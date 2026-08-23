@@ -1,0 +1,49 @@
+name: Android Build and Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Build debug APK
+        run: gradle :app:assembleDebug
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=v1.0.63
+          apk=content-transfer-v1.0.63.apk
+          curl --fail --location --retry 3 -o "$apk" \
+            "http://nas.yode.ink:8084/download/files/$apk"
+          echo "4c384dbba628b296d05150f67d35a58aa15faffecbea23d3c45fff2e1f929f8d  $apk" | sha256sum --check
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$apk" --clobber
+          else
+            gh release create "$tag" "$apk" \
+              --target "$GITHUB_SHA" \
+              --title "内容中转 Android 1.0.63" \
+              --notes "新增设备中心、浏览器远程关闭并锁定、设备重命名与持久解除锁定。使用原生产证书签名，可覆盖升级。"
+          fi
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
