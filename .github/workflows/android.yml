@@ -46,4 +46,3 @@ jobs:
               --title "内容中转 Android 1.0.63" \
               --notes "新增设备中心、浏览器远程关闭并锁定、设备重命名与持久解除锁定。使用原生产证书签名，可覆盖升级。"
           fi
-warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)

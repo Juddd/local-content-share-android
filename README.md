@@ -1,4 +1,3 @@
-warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
 # 内容中转 Android
 
 Local Content Share 的原生 Android 客户端，支持文字、文件、链接、Markdown 记事本、本地优先离线队列、稳定 UUID、结构化 SSE 和浏览器设备中心。
