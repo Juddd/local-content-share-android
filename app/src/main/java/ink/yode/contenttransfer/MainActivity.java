@@ -87,8 +87,10 @@ public class MainActivity extends Activity {
     private AlertDialog deviceCenterDialog;
     private LinearLayout deviceCenterList;
     private TextView deviceCenterStatus;
-    private boolean deviceCenterLoading;
-    private final Runnable deviceCenterPoll = this::loadDeviceCenter;
+    private TextView deviceStrip;
+    private JSONArray cachedDevices = new JSONArray();
+    private boolean deviceSummaryLoading, deviceSummaryActive;
+    private final Runnable deviceSummaryPoll = this::loadDeviceSummary;
 
     private class TransferUi {
         final ProgressBar progress;
@@ -165,13 +167,13 @@ public class MainActivity extends Activity {
         if(activeBase.isEmpty())mainHandler.post(()->showServerConfig(true));
     }
 
-    @Override protected void onResume(){super.onResume();if(adapter!=null)renderSection();if(!activeBase.isEmpty()){refresh();startRealtimeUpdates();drainOutbox();resumePendingUploads();SyncRetryJobService.schedule(this);}}
+    @Override protected void onResume(){super.onResume();deviceSummaryActive=true;if(adapter!=null)renderSection();if(!activeBase.isEmpty()){refresh();startRealtimeUpdates();drainOutbox();resumePendingUploads();SyncRetryJobService.schedule(this);loadDeviceSummary();}}
 
     @Override protected void onStart(){super.onStart();if(!shareProgressReceiverRegistered){IntentFilter filter=new IntentFilter(ShareUploadService.ACTION_UPLOAD_PROGRESS);if(Build.VERSION.SDK_INT>=33)registerReceiver(shareProgressReceiver,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(shareProgressReceiver,filter);shareProgressReceiverRegistered=true;}if(!networkCallbackRegistered){try{getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(networkCallback);networkCallbackRegistered=true;}catch(Exception ignored){}}}
 
     @Override protected void onStop(){if(shareProgressReceiverRegistered){unregisterReceiver(shareProgressReceiver);shareProgressReceiverRegistered=false;}if(networkCallbackRegistered){try{getSystemService(ConnectivityManager.class).unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}networkCallbackRegistered=false;}super.onStop();}
 
-    @Override protected void onPause(){stopRealtimeUpdates();super.onPause();}
+    @Override protected void onPause(){deviceSummaryActive=false;mainHandler.removeCallbacks(deviceSummaryPoll);stopRealtimeUpdates();super.onPause();}
 
     private void takePersistable(Uri uri,Intent intent){try{int flags=intent.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);getContentResolver().takePersistableUriPermission(uri,flags&Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}}
 
@@ -197,6 +199,7 @@ public class MainActivity extends Activity {
         if (value.startsWith("1.0.60\n")) value="1.0.61\n• 修复 NAS 操作成功后底部仍停留在待同步的问题\n• 修复前台同步与后台任务竞争时可能丢失自动重试的问题\n• 成功与冲突状态现在会及时、准确地回写到界面\n\n"+value;
         if (value.startsWith("1.0.61\n")) value="1.0.62\n• 恢复同步成功提示中的局域网或外网标识\n• 保留操作完成后自动从待同步切换为已同步的修复\n\n"+value;
         if (value.startsWith("1.0.62\n")) value="1.0.63\n• 新增设备中心，可查看在线、后台和离线的网页客户端\n• 支持给浏览器设备重命名、远程关闭并锁定或解除锁定\n• 锁定覆盖同一浏览器配置的所有标签页，刷新后仍显示 404\n• 设备身份不使用浏览器指纹，名称和锁定状态由 NAS 永久保存\n\n"+value;
+        if (value.startsWith("1.0.63\n")) value="1.0.64\n• 有浏览器设备时，各内容区顶部显示设备状态窄条\n• 设备列表用图标直接重命名、关闭锁定或解除锁定\n• IP 地址标明相对于 NAS 的局域网或外网类型\n• 超过 30 天未活动且已离线的浏览器设备自动清理\n\n"+value;
         TextView v = new TextView(this); v.setText(value); v.setTextSize(sp); v.setTextColor(color); v.setPadding(dp(12),dp(10),dp(12),dp(10)); return v;
     }
     private GradientDrawable rounded(int color,int radius) { GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d; }
@@ -239,6 +242,8 @@ public class MainActivity extends Activity {
         TextView uploadHeading=text("上传任务",15,Color.rgb(62,43,78));uploadHeading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);uploadHeading.setPadding(dp(2),0,dp(2),dp(6));uploadPanel.addView(uploadHeading);
         uploadTasks=new LinearLayout(this);uploadTasks.setOrientation(LinearLayout.VERTICAL);uploadPanel.addView(uploadTasks,new LinearLayout.LayoutParams(-1,-2));
         LinearLayout.LayoutParams uploadPanelParams=new LinearLayout.LayoutParams(-1,-2);uploadPanelParams.setMargins(0,0,0,dp(8));root.addView(uploadPanel,uploadPanelParams);
+        deviceStrip=text("",13,Color.rgb(73,62,80));deviceStrip.setGravity(Gravity.CENTER_VERTICAL);deviceStrip.setPadding(dp(12),0,dp(12),0);deviceStrip.setBackground(rounded(Color.rgb(239,234,242),8));deviceStrip.setVisibility(View.GONE);deviceStrip.setOnClickListener(v->showDeviceCenter());
+        LinearLayout.LayoutParams deviceStripParams=new LinearLayout.LayoutParams(-1,dp(38));deviceStripParams.setMargins(0,0,0,dp(7));root.addView(deviceStrip,deviceStripParams);
         list=new ListView(this); adapter=new ItemAdapter(); list.setAdapter(adapter); root.addView(list,new LinearLayout.LayoutParams(-1,0,1));
         swipeRefresh = new SwipeRefreshLayout(this);
         swipeRefresh.setColorSchemeColors(Color.rgb(103,80,164));
@@ -562,41 +567,43 @@ public class MainActivity extends Activity {
 
     private void showDeviceCenter(){
         if(activeBase.isEmpty()){toast("请先配置服务器地址");return;}
-        LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setPadding(dp(14),0,dp(14),0);
+        LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setPadding(dp(14),dp(14),dp(14),0);
         deviceCenterStatus=text("正在读取设备…",13,Color.rgb(96,87,101));deviceCenterStatus.setPadding(dp(4),dp(2),dp(4),dp(8));page.addView(deviceCenterStatus);
         deviceCenterList=new LinearLayout(this);deviceCenterList.setOrientation(LinearLayout.VERTICAL);
         ScrollView scroll=new ScrollView(this);scroll.addView(deviceCenterList);page.addView(scroll,new LinearLayout.LayoutParams(-1,dp(470)));
-        deviceCenterDialog=new AlertDialog.Builder(this).setTitle("设备中心").setView(page).setNegativeButton("关闭",null).create();
-        deviceCenterDialog.setOnDismissListener(d->{mainHandler.removeCallbacks(deviceCenterPoll);deviceCenterDialog=null;deviceCenterList=null;deviceCenterStatus=null;deviceCenterLoading=false;});
-        deviceCenterDialog.show();loadDeviceCenter();
+        deviceCenterDialog=new AlertDialog.Builder(this).setView(page).setNegativeButton("关闭",null).create();
+        deviceCenterDialog.setOnDismissListener(d->{deviceCenterDialog=null;deviceCenterList=null;deviceCenterStatus=null;});
+        deviceCenterDialog.show();renderDevices(cachedDevices);loadDeviceSummary();
     }
 
-    private void loadDeviceCenter(){
-        mainHandler.removeCallbacks(deviceCenterPoll);
-        if(deviceCenterDialog==null||!deviceCenterDialog.isShowing()||deviceCenterLoading)return;
-        deviceCenterLoading=true;String base=activeBase;
+    private void loadDeviceSummary(){
+        mainHandler.removeCallbacks(deviceSummaryPoll);
+        if(activeBase.isEmpty()||deviceSummaryLoading)return;
+        deviceSummaryLoading=true;String base=activeBase;
         metadataIo.execute(()->{try{
             HttpURLConnection c=connection(activeNetwork,base+"/api/v1/devices",7000);JSONArray devices=new JSONObject(read(c)).optJSONArray("devices");if(devices==null)devices=new JSONArray();JSONArray result=devices;
-            runOnUiThread(()->{deviceCenterLoading=false;if(deviceCenterDialog==null||!deviceCenterDialog.isShowing()||!base.equals(activeBase))return;renderDevices(result);mainHandler.postDelayed(deviceCenterPoll,5000);});
-        }catch(Exception e){runOnUiThread(()->{deviceCenterLoading=false;if(deviceCenterStatus!=null){deviceCenterStatus.setText("读取失败 · "+e.getMessage());mainHandler.postDelayed(deviceCenterPoll,5000);}});}});
+            runOnUiThread(()->{deviceSummaryLoading=false;if(!base.equals(activeBase))return;cachedDevices=result;updateDeviceStrip();if(deviceCenterDialog!=null&&deviceCenterDialog.isShowing())renderDevices(result);if(deviceSummaryActive)mainHandler.postDelayed(deviceSummaryPoll,5000);});
+        }catch(Exception e){runOnUiThread(()->{deviceSummaryLoading=false;if(deviceCenterStatus!=null)deviceCenterStatus.setText("读取失败 · "+e.getMessage());if(deviceSummaryActive)mainHandler.postDelayed(deviceSummaryPoll,5000);});}});
     }
+
+    private void updateDeviceStrip(){if(deviceStrip==null)return;int count=cachedDevices.length();deviceStrip.setVisibility(count==0?View.GONE:View.VISIBLE);if(count>0)deviceStrip.setText("共 "+count+" 台浏览器设备 · 每 5 秒更新");}
 
     private void renderDevices(JSONArray devices){
         if(deviceCenterList==null)return;deviceCenterList.removeAllViews();
         if(devices.length()==0){deviceCenterStatus.setText("还没有浏览器设备打开过网页");return;}
         deviceCenterStatus.setText("共 "+devices.length()+" 台浏览器设备 · 每 5 秒更新");
         for(int index=0;index<devices.length();index++)try{
-            JSONObject device=devices.getJSONObject(index);String id=device.getString("id"),name=device.optString("name"),display=device.optString("displayName","浏览器设备"),platform=device.optString("platform"),browser=device.optString("browser"),ip=device.optString("ip"),state=device.optString("state","offline");boolean locked=device.optBoolean("locked");int tabs=device.optInt("tabs");
+            JSONObject device=devices.getJSONObject(index);String id=device.getString("id"),name=device.optString("name"),display=device.optString("displayName","浏览器设备"),platform=device.optString("platform"),browser=device.optString("browser"),ip=device.optString("ip"),network=device.optString("network"),state=device.optString("state","offline");boolean locked=device.optBoolean("locked");int tabs=device.optInt("tabs");
             LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(14),dp(11),dp(14),dp(11));card.setBackground(rounded(Color.WHITE,16));
-            TextView title=text(display,16,Color.rgb(45,39,49));title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);title.setPadding(0,0,0,dp(3));card.addView(title);
-            String details=joinDeviceDetails(platform,browser,ip,tabs);TextView detail=text(details,13,Color.rgb(96,87,101));detail.setPadding(0,0,0,dp(3));card.addView(detail);
-            String moment=locked?device.optString("lockedAt"):device.optString("lastActivity");String stateText=deviceStateText(state,moment);TextView stateView=text(stateText,13,locked?Color.rgb(180,62,62):Color.rgb(75,151,174));stateView.setPadding(0,0,0,dp(8));card.addView(stateView);
-            LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.END);TextView rename=actionChip("重命名",false);rename.setOnClickListener(v->renameDevice(id,name,display));actions.addView(rename,new LinearLayout.LayoutParams(0,dp(42),1));TextView toggle=actionChip(locked?"解除锁定":"关闭并锁定",!locked);toggle.setOnClickListener(v->setDeviceLocked(id,!locked,display));LinearLayout.LayoutParams toggleParams=new LinearLayout.LayoutParams(0,dp(42),1);toggleParams.setMarginStart(dp(8));actions.addView(toggle,toggleParams);card.addView(actions);
+            LinearLayout titleRow=new LinearLayout(this);titleRow.setGravity(Gravity.CENTER_VERTICAL);TextView title=text(display,16,Color.rgb(45,39,49));title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);title.setPadding(0,0,dp(6),dp(3));titleRow.addView(title,new LinearLayout.LayoutParams(0,-2,1));ImageView rename=deviceIconButton(R.drawable.ic_action_rename,"重命名",v->renameDevice(id,name,display));titleRow.addView(rename,new LinearLayout.LayoutParams(dp(36),dp(36)));ImageView toggle=deviceIconButton(locked?R.drawable.ic_action_lock_closed:R.drawable.ic_action_lock_open,locked?"解除锁定":"关闭并锁定",v->setDeviceLocked(id,!locked,display));LinearLayout.LayoutParams toggleParams=new LinearLayout.LayoutParams(dp(36),dp(36));toggleParams.setMarginStart(dp(4));titleRow.addView(toggle,toggleParams);card.addView(titleRow);
+            String details=joinDeviceDetails(platform,browser,ip,network,tabs);TextView detail=text(details,13,Color.rgb(96,87,101));detail.setPadding(0,0,0,dp(3));card.addView(detail);
+            String moment=locked?device.optString("lockedAt"):device.optString("lastActivity");String stateText=deviceStateText(state,moment);TextView stateView=text(stateText,13,locked?Color.rgb(180,62,62):Color.rgb(75,151,174));stateView.setPadding(0,0,0,0);card.addView(stateView);
             LinearLayout.LayoutParams cardParams=new LinearLayout.LayoutParams(-1,-2);cardParams.setMargins(0,0,0,dp(9));deviceCenterList.addView(card,cardParams);
         }catch(JSONException ignored){}
     }
 
-    private String joinDeviceDetails(String platform,String browser,String ip,int tabs){ArrayList<String> parts=new ArrayList<>();if(!platform.isEmpty())parts.add(platform);if(!browser.isEmpty())parts.add(browser);if(!ip.isEmpty())parts.add(ip);if(tabs>0)parts.add(tabs+" 个页面");return android.text.TextUtils.join(" · ",parts);}
+    private ImageView deviceIconButton(int drawableId,String description,View.OnClickListener action){ImageView view=new ImageView(this);view.setImageResource(drawableId);view.setImageTintList(android.content.res.ColorStateList.valueOf(Color.rgb(75,151,174)));view.setScaleType(ImageView.ScaleType.CENTER);view.setPadding(dp(9),dp(9),dp(9),dp(9));view.setBackground(rounded(Color.rgb(244,240,246),9));view.setContentDescription(description);view.setOnClickListener(action);return view;}
+    private String joinDeviceDetails(String platform,String browser,String ip,String network,int tabs){ArrayList<String> parts=new ArrayList<>();if(!platform.isEmpty())parts.add(platform);if(!browser.isEmpty())parts.add(browser);if(!ip.isEmpty())parts.add(ip+(network.equals("lan")?"（局域网）":network.equals("wan")?"（外网）":""));if(tabs>0)parts.add(tabs+" 个页面");return android.text.TextUtils.join(" · ",parts);}
     private String deviceStateText(String state,String iso){String label=state.equals("online")?"在线":state.equals("background")?"后台":state.equals("locked")?"已锁定":"离线";String time=deviceTimeText(iso,state.equals("locked"));return time.isEmpty()?label:label+" · "+time;}
     private String deviceTimeText(String iso,boolean absolute){
         if(iso==null||iso.isEmpty()||iso.startsWith("0001-"))return "";try{long value=java.time.Instant.parse(iso).toEpochMilli();if(absolute)return new java.text.SimpleDateFormat("MM/dd HH:mm",Locale.CHINA).format(new Date(value));long seconds=Math.max(0,(System.currentTimeMillis()-value)/1000);if(seconds<5)return "刚刚活动";if(seconds<60)return seconds+" 秒前活动";if(seconds<3600)return seconds/60+" 分钟前活动";if(seconds<86400)return seconds/3600+" 小时前活动";return new java.text.SimpleDateFormat("MM/dd HH:mm",Locale.CHINA).format(new Date(value))+" 活动";}catch(Exception ignored){return "";}
@@ -606,11 +613,11 @@ public class MainActivity extends Activity {
     private void setDeviceLocked(String id,boolean locked,String display){deviceAction(id,locked?"lock":"unlock",null,locked?"已请求关闭并锁定 "+display:"已解除锁定 "+display);}
     private void deviceAction(String id,String action,String name,String success){
         if(deviceCenterStatus!=null)deviceCenterStatus.setText("正在执行…");String base=activeBase;
-        metadataIo.execute(()->{try{HttpURLConnection c=connection(activeNetwork,base+"/api/v1/devices/"+Uri.encode(id)+"/"+action,7000);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json; charset=utf-8");JSONObject body=new JSONObject();if(name!=null)body.put("name",name);try(OutputStream out=c.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}read(c);runOnUiThread(()->{toast(success);loadDeviceCenter();});}catch(Exception e){runOnUiThread(()->{if(deviceCenterStatus!=null)deviceCenterStatus.setText("操作失败 · "+e.getMessage());});}});
+        metadataIo.execute(()->{try{HttpURLConnection c=connection(activeNetwork,base+"/api/v1/devices/"+Uri.encode(id)+"/"+action,7000);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json; charset=utf-8");JSONObject body=new JSONObject();if(name!=null)body.put("name",name);try(OutputStream out=c.getOutputStream()){out.write(body.toString().getBytes(StandardCharsets.UTF_8));}read(c);runOnUiThread(()->{toast(success);loadDeviceSummary();});}catch(Exception e){runOnUiThread(()->{if(deviceCenterStatus!=null)deviceCenterStatus.setText("操作失败 · "+e.getMessage());});}});
     }
 
-    private void showSettings(){LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(24),0,dp(24),0);TextView server=button("配置服务器地址");server.setOnClickListener(v->showServerConfig(false));box.addView(server);TextView devices=button("设备中心");devices.setOnClickListener(v->showDeviceCenter());LinearLayout.LayoutParams deviceParams=new LinearLayout.LayoutParams(-1,-2);deviceParams.setMargins(0,dp(8),0,dp(8));box.addView(devices,deviceParams);box.addView(text("Snippet 预览字数",14,Color.DKGRAY));EditText e=input("1 至 100000",false);e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);e.setText(String.valueOf(prefs.getInt("preview",600)));box.addView(e);new AlertDialog.Builder(this).setTitle("设置").setView(box).setPositiveButton("保存",(d,w)->{try{int n=Integer.parseInt(e.getText().toString());if(n<1||n>100000)throw new Exception();prefs.edit().putInt("preview",n).apply();renderSection();}catch(Exception x){toast("请输入 1 至 100000");}}).setNeutralButton("关于",(d,w)->showAbout()).setNegativeButton("取消",null).show();}
-    private void showServerConfig(boolean required){EditText field=input("例如 http://192.168.1.10:8084/",false);field.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);field.setText(activeBase);AlertDialog dialog=new AlertDialog.Builder(this).setTitle("配置服务器地址").setMessage("请输入包含 http:// 或 https:// 的服务地址").setView(field).setPositiveButton("保存",null).setNegativeButton(required?null:"取消",null).setCancelable(!required).create();dialog.setOnShowListener(x->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{String normalized=ServerConfig.normalize(field.getText().toString());if(normalized.isEmpty()){field.setError("请输入有效的 http:// 或 https:// 地址");return;}if(!ServerConfig.save(this,normalized)){field.setError("保存失败");return;}stopRealtimeUpdates();serverGeneration++;lastEventSequence=-1;mainHandler.removeCallbacks(realtimeRefresh);thumbnailCache.evictAll();activeBase=normalized;reloadLocal(normalized);status.setText("已显示该服务器的离线数据，正在连接…");dialog.dismiss();refresh();startRealtimeUpdates();drainOutbox();resumePendingUploads();}));dialog.show();}
+    private void showSettings(){LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(24),0,dp(24),0);TextView server=button("配置服务器地址");server.setOnClickListener(v->showServerConfig(false));LinearLayout.LayoutParams serverParams=new LinearLayout.LayoutParams(-1,-2);serverParams.setMargins(0,0,0,dp(8));box.addView(server,serverParams);box.addView(text("Snippet 预览字数",14,Color.DKGRAY));EditText e=input("1 至 100000",false);e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);e.setText(String.valueOf(prefs.getInt("preview",600)));box.addView(e);new AlertDialog.Builder(this).setTitle("设置").setView(box).setPositiveButton("保存",(d,w)->{try{int n=Integer.parseInt(e.getText().toString());if(n<1||n>100000)throw new Exception();prefs.edit().putInt("preview",n).apply();renderSection();}catch(Exception x){toast("请输入 1 至 100000");}}).setNeutralButton("关于",(d,w)->showAbout()).setNegativeButton("取消",null).show();}
+    private void showServerConfig(boolean required){EditText field=input("例如 http://192.168.1.10:8084/",false);field.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);field.setText(activeBase);AlertDialog dialog=new AlertDialog.Builder(this).setTitle("配置服务器地址").setMessage("请输入包含 http:// 或 https:// 的服务地址").setView(field).setPositiveButton("保存",null).setNegativeButton(required?null:"取消",null).setCancelable(!required).create();dialog.setOnShowListener(x->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{String normalized=ServerConfig.normalize(field.getText().toString());if(normalized.isEmpty()){field.setError("请输入有效的 http:// 或 https:// 地址");return;}if(!ServerConfig.save(this,normalized)){field.setError("保存失败");return;}stopRealtimeUpdates();serverGeneration++;lastEventSequence=-1;mainHandler.removeCallbacks(realtimeRefresh);thumbnailCache.evictAll();activeBase=normalized;cachedDevices=new JSONArray();updateDeviceStrip();reloadLocal(normalized);status.setText("已显示该服务器的离线数据，正在连接…");dialog.dismiss();refresh();startRealtimeUpdates();drainOutbox();resumePendingUploads();loadDeviceSummary();}));dialog.show();}
     private void showAbout(){String changes="1.0.24\n• 修复特殊字符文件名的访问与上传编码\n• 限制超大剪贴板文本，避免辅助服务阻塞\n\n1.0.23\n• 复制纯文本后显示右侧快捷上传圆钮\n• 点击圆钮发送到 Snippets，1.5 秒未点击自动消失\n• 微信分享的无后缀图片会按 MIME 类型补充扩展名\n\n1.0.22\n• 手机下载实时显示进度，可取消并自动清理失败文件\n• NAS 从 URL 下载显示真实进度，支持取消和失败状态\n\n1.0.21\n• 手机端即时同步其它设备上的新增、修改和删除\n• 返回前台时自动同步最新内容\n\n1.0.20\n• 上传失败自动重试三次并显示具体原因\n\n1.0.19\n• 分享上传和 App 内上传统一先复制到本地缓存\n• 大文件上传显示文件名和实时百分比\n\n1.0.18\n• 修复系统分享大文件时来源 URI 过早失效的问题\n\n1.0.17\n• 文件来源按钮统一改名为从 URL 下载\n\n1.0.16\n• Files 新增添加 URL，由 NAS 直接下载公网文件\n\n1.0.15\n• 缩略图改由 NAS 生成并传输小图\n\n1.0.14\n• 修复列表滚动后图片缩略图反复消失并重新下载的问题\n\n1.0.13\n• Files 中的图片文件显示按比例缩放的缩略图\n\n1.0.12\n• 同步状态仅显示局域网或外网\n\n1.0.11\n• 同步网址后显示当前使用局域网还是外网\n• 关于页面补齐版本更新记录\n\n1.0.10\n• 未下载或本地已删除的文件灰显打开选项\n• 删除本地文件后自动清除绿色状态线\n• 增加 APK 安装权限检查与授权引导\n\n1.0.9\n• Files 操作恢复到长按菜单，下载与打开拆分\n• 强制纠正 APK 的文件名和 MIME 类型\n\n1.0.8\n• 修复 APK 下载后被追加 .zip 后缀\n• 设置中增加关于与版本记录\n\n1.0.7\n• 统一使用 配置的服务器域名，由 DNS 完成内外网分流\n\n1.0.6\n• Files 上传增加保存时间\n• 本地文件使用底部绿色粗线标记\n\n1.0.5\n• 新建文字默认永不过期，可直接选择保存时间\n• Files 分离下载和打开按钮，下载后才可打开\n\n1.0.4\n• 根据 本地网关判断家庭网络\n\n1.0.3\n• 增加下拉刷新并保留刷新按钮\n\n1.0.2\n• 支持从系统分享面板上传单个或多个文件\n\n1.0.1\n• 修复 Android 16 状态栏遮挡并优化顶部界面\n\n1.0.0\n• 首个 Android 原生版本，支持文字、文件、链接和记事本";TextView content=text(changes,14,Color.rgb(45,39,49));content.setTextIsSelectable(true);ScrollView scroll=new ScrollView(this);scroll.setPadding(dp(12),0,dp(12),0);scroll.addView(content);new AlertDialog.Builder(this).setTitle("内容中转  " + appVersion()).setView(scroll).setPositiveButton("关闭",null).show();}
     private String appVersion(){try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(Exception ignored){return "";}}
     private void postRaw(String endpoint,String value){metadataIo.execute(()->{try{HttpURLConnection c=connection(activeNetwork,activeBase+endpoint,7000);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Content-Type","text/plain; charset=utf-8");c.getOutputStream().write(value.getBytes(StandardCharsets.UTF_8));read(c);runOnUiThread(()->toast("已保存"));}catch(Exception e){setStatus("保存失败 · "+e.getMessage());}});}
@@ -618,5 +625,5 @@ public class MainActivity extends Activity {
     private String path(String id){return Uri.encode(id,"/");}
     private void copy(String s){((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("内容中转",s));toast("已复制");}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
-    @Override protected void onDestroy(){stopRealtimeUpdates();mainHandler.removeCallbacks(outboxRetry);mainHandler.removeCallbacks(deviceCenterPoll);metadataIo.shutdownNow();transferIo.shutdownNow();thumbnailIo.shutdownNow();realtimeIo.shutdownNow();super.onDestroy();}
+    @Override protected void onDestroy(){stopRealtimeUpdates();mainHandler.removeCallbacks(outboxRetry);mainHandler.removeCallbacks(deviceSummaryPoll);metadataIo.shutdownNow();transferIo.shutdownNow();thumbnailIo.shutdownNow();realtimeIo.shutdownNow();super.onDestroy();}
 }

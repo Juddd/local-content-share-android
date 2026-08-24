@@ -33,16 +33,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=v1.0.63
-          apk=content-transfer-v1.0.63.apk
+          tag=v1.0.64
+          apk=content-transfer-v1.0.64.apk
           curl --fail --location --retry 3 -o "$apk" \
             "http://nas.yode.ink:8084/download/files/$apk"
-          echo "4c384dbba628b296d05150f67d35a58aa15faffecbea23d3c45fff2e1f929f8d  $apk" | sha256sum --check
+          echo "1ed13a43f682ac0b4c62064e03700df9c866b750f6af1bbb5fb9a1c8cfd8e1b  $apk" | sha256sum --check
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$apk" --clobber
           else
             gh release create "$tag" "$apk" \
               --target "$GITHUB_SHA" \
-              --title "内容中转 Android 1.0.63" \
-              --notes "新增设备中心、浏览器远程关闭并锁定、设备重命名与持久解除锁定。使用原生产证书签名，可覆盖升级。"
+              --title "内容中转 Android 1.0.64" \
+              --notes "内容区新增浏览器设备状态窄条；设备详情支持 IP 局域网/外网标识、同行图标重命名和锁定操作；服务端自动清理超过 30 天未活动的离线设备。使用原生产证书签名，可覆盖升级。"
           fi
