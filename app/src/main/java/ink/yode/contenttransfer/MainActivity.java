@@ -179,6 +179,7 @@ public class MainActivity extends Activity {
 
     private class FavoriteDrawable extends Drawable {
         private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);private final Item item;
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
         FavoriteDrawable(Item item){this.item=item;paint.setTextAlign(Paint.Align.CENTER);paint.setTypeface(Typeface.DEFAULT);paint.setTextSize(dp(18));}
         @Override public void draw(Canvas canvas){String symbol=item.favorite?"★":"☆";paint.setColor(item.favorite?Color.rgb(245,183,0):Color.rgb(120,115,122));paint.setAlpha(favoritePending.contains(item.id)?115:255);Paint.FontMetrics fm=paint.getFontMetrics();float x=getBounds().right-dp(18),y=getBounds().bottom-dp(2)-fm.descent;canvas.drawText(symbol,x,y,paint);}
         @Override public void setAlpha(int alpha){paint.setAlpha(alpha);invalidateSelf();}
@@ -359,6 +360,7 @@ public class MainActivity extends Activity {
                     Network net=findNetwork(false);
                     c=connection(net,activeBase+"/api/updates"+(lastEventSequence>=0?"?since="+lastEventSequence:""),10000);
                     c.setReadTimeout(45000);
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
                     c.setRequestProperty("Accept","text/event-stream");
                     realtimeConnection=c;
                     if(c.getResponseCode()!=HttpURLConnection.HTTP_OK)throw new IOException("HTTP "+c.getResponseCode());
@@ -539,6 +541,7 @@ public class MainActivity extends Activity {
             JSONObject task=new JSONObject(read(create));ui.serverTaskId=task.getString("id");
             while(!ui.cancelled){
                 HttpURLConnection poll=connection(activeNetwork,activeBase+"/api/v1/download-tasks/"+ui.serverTaskId,7000);ui.connection=poll;task=new JSONObject(read(poll));String state=task.optString("status");ui.update("NAS 正在下载",task.optLong("received"),task.optLong("total",-1));
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
                 if(state.equals("completed")){ui.connection=null;ui.serverTaskId=null;ui.success("下载完成，已加入 Files");refresh();return;}
                 if(state.equals("failed"))throw new IOException(task.optString("error","NAS 下载失败"));
                 if(state.equals("cancelled"))throw new InterruptedIOException("下载已取消");
