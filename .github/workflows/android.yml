@@ -33,16 +33,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=v1.0.64
-          apk=content-transfer-v1.0.64.apk
+          tag=v1.0.65
+          apk=content-transfer-v1.0.65.apk
           curl --fail --location --retry 6 --retry-all-errors --retry-delay 5 -o "$apk" \
             "http://nas.yode.ink:8084/download/files/$apk"
-          echo "1ed13a43f682ac0b4c62064e03700df9c866b750f6af1bbb5fb9a1c8cfd8e1b  $apk" | sha256sum --check
+          echo "9dddded38e3ecc55f16dc5c3913330b35d690e182510c29ec919ad85ea10d4ef  $apk" | sha256sum --check
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$apk" --clobber
           else
             gh release create "$tag" "$apk" \
               --target "$GITHUB_SHA" \
-              --title "内容中转 Android 1.0.64" \
-              --notes "内容区新增浏览器设备状态窄条；设备详情支持 IP 局域网/外网标识、同行图标重命名和锁定操作；服务端自动清理超过 30 天未活动的离线设备。使用原生产证书签名，可覆盖升级。"
+              --title "内容中转 Android 1.0.65" \
+              --notes "设备中心改为从底部滑入的全窗口页面；设备窄条只显示在文字、文件和链接区；系统分享上传与 App 主界面任务卡统一实时进度；修复文件已上传到 NAS 但任务仍停留在等待处理的问题。使用原生产证书签名，可覆盖升级。"
           fi
