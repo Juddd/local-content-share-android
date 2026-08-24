@@ -71,8 +71,8 @@ public class MainActivity extends Activity {
     private TextView uploadProgressMessage;
     private ProgressBar uploadProgressBar;
     private int activeUploadCount;
-    private final Set<String> activePendingUploads=Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Map<String, UploadTaskUi> uploadTaskUis = new ConcurrentHashMap<>();
+    private final Set<String> uploadExecutions = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private boolean uploadDialogSuppressed;
     private boolean shareProgressReceiverRegistered;
     private boolean networkCallbackRegistered;
@@ -87,6 +87,7 @@ public class MainActivity extends Activity {
         if(name!=null&&!name.isEmpty()){
             UploadTaskUi task=findUploadTask(name,uploadId);
             if(task==null)task=new UploadTaskUi(name,uploadId);
+            else task.bindUploadId(uploadId);
             if(finished){
                 if(message.contains("已上传到 Files"))task.complete(savedName==null||savedName.isEmpty()?name:savedName);
                 else task.failed(name,message);
@@ -102,6 +103,7 @@ public class MainActivity extends Activity {
     private volatile long lastEventSequence = -1;
     private volatile int serverGeneration;
     private SyncDatabase syncDb;
+    private SyncTransferEngine syncEngine;
     private final Runnable realtimeRefresh = this::refresh;
     private Dialog deviceCenterDialog;
     private LinearLayout deviceCenterList;
@@ -136,6 +138,7 @@ public class MainActivity extends Activity {
         final TextView label;
         final ProgressBar progress;
         final String taskName;
+        final AtomicBoolean finished = new AtomicBoolean();
         String uploadId;
         UploadTaskUi(String name) { this(name,null); }
         UploadTaskUi(String name,String id) {
@@ -156,7 +159,7 @@ public class MainActivity extends Activity {
         void failed(String name,String error){finish(name+" · 失败："+error,Color.rgb(180,40,40),0);}
         void bindUploadId(String id){if(id==null||id.isEmpty()||id.equals(uploadId))return;uploadId=id;uploadTaskUis.put(id,this);}
         private String labelName(){String value=label.getText().toString();int split=value.indexOf(" · ");return split<0?value:value.substring(0,split);}
-        private void finish(String textValue,int color,int value){runOnUiThread(()->{progress.setIndeterminate(false);progress.setProgress(value);label.setText(textValue);label.setTextColor(color);showUploadProgress(textValue,value,100);activeUploadCount=Math.max(0,activeUploadCount-1);removeUploadTask(this);if(activeUploadCount==0)mainHandler.postDelayed(()->{if(activeUploadCount==0&&uploadProgressDialog!=null){uploadProgressDialog.dismiss();uploadProgressDialog=null;}},2500);mainHandler.postDelayed(()->{uploadTasks.removeView(row);if(uploadTasks.getChildCount()==0)uploadPanel.setVisibility(View.GONE);},10000);});}
+        private void finish(String textValue,int color,int value){if(!finished.compareAndSet(false,true))return;runOnUiThread(()->{progress.setIndeterminate(false);progress.setProgress(value);label.setText(textValue);label.setTextColor(color);showUploadProgress(textValue,value,100);activeUploadCount=Math.max(0,activeUploadCount-1);removeUploadTask(this);if(activeUploadCount==0)mainHandler.postDelayed(()->{if(activeUploadCount==0&&uploadProgressDialog!=null){uploadProgressDialog.dismiss();uploadProgressDialog=null;}},2500);mainHandler.postDelayed(()->{uploadTasks.removeView(row);if(uploadTasks.getChildCount()==0)uploadPanel.setVisibility(View.GONE);},10000);});}
     }
 
     private void registerUploadTask(UploadTaskUi task){if(task.uploadId!=null&&!task.uploadId.isEmpty())uploadTaskUis.put(task.uploadId,task);uploadTaskUis.putIfAbsent(task.taskName,task);}
@@ -189,6 +192,7 @@ public class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},4201);
         prefs = getSharedPreferences("content-transfer", MODE_PRIVATE);
         syncDb=new SyncDatabase(this);
+        syncEngine=new SyncTransferEngine(this,syncDb,(url,timeout)->connection(findNetwork(false),url,timeout));
         activeBase=ServerConfig.get(this);
         buildUi();
         loadCache();
@@ -229,6 +233,7 @@ public class MainActivity extends Activity {
         if (value.startsWith("1.0.62\n")) value="1.0.63\n• 新增设备中心，可查看在线、后台和离线的网页客户端\n• 支持给浏览器设备重命名、远程关闭并锁定或解除锁定\n• 锁定覆盖同一浏览器配置的所有标签页，刷新后仍显示 404\n• 设备身份不使用浏览器指纹，名称和锁定状态由 NAS 永久保存\n\n"+value;
         if (value.startsWith("1.0.63\n")) value="1.0.64\n• 有浏览器设备时，各内容区顶部显示设备状态窄条\n• 设备列表用图标直接重命名、关闭锁定或解除锁定\n• IP 地址标明相对于 NAS 的局域网或外网类型\n• 超过 30 天未活动且已离线的浏览器设备自动清理\n\n"+value;
         if (value.startsWith("1.0.64\n")) value="1.0.65\n• 设备列表改为从底部滑入的全窗口页面\n• 设备窄条只显示在文字、文件和链接区\n• 系统分享上传与主界面任务卡统一实时进度\n• 修复文件已上传但任务仍停留在等待处理的问题\n• 后台重试不再与正在执行的分享上传争抢任务\n\n"+value;
+        if (value.startsWith("1.0.65\n")) value="1.0.66\n• 离线同步、后台重试和文件上传统一使用同一引擎\n• 前台、系统分享与后台任务共用进度和完成状态\n• 修复并发接手上传时可能停留在等待处理的问题\n• 服务端内容身份、收藏、revision 和时间元数据集中管理\n• 文件上传与 URL 下载支持事务恢复和跨重启幂等\n• 设备中心仅显示可靠地址，并清理旧诊断与无用权限\n\n"+value;
         TextView v = new TextView(this); v.setText(value); v.setTextSize(sp); v.setTextColor(color); v.setPadding(dp(12),dp(10),dp(12),dp(10)); return v;
     }
     private GradientDrawable rounded(int color,int radius) { GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d; }
@@ -495,26 +500,17 @@ public class MainActivity extends Activity {
         final String base=activeBase;
         if(base.isEmpty()||metadataIo.isShutdown()||!outboxDrainScheduled.compareAndSet(false,true))return;
         try{metadataIo.execute(()->{
-            long retryDelay=0;boolean lockAcquired=false;
+            long retryDelay=0;
             try{
-                lockAcquired=SyncDatabase.beginOperations();
-                if(!lockAcquired){retryDelay=250;return;}
-                while(base.equals(activeBase)){
-                    SyncDatabase.Operation op=syncDb.next(base);if(op==null)break;
-                    syncDb.syncing(base,op.itemId);runOnUiThread(()->reloadLocal(base));
-                    try{
-                        JSONObject payload=new JSONObject(op.payload),values=payload.getJSONObject("values");values.put("expectedRevision",op.baseRevision);
-                        StringBuilder body=new StringBuilder();Iterator<String> keys=values.keys();while(keys.hasNext()){String k=keys.next();if(body.length()>0)body.append('&');body.append(URLEncoder.encode(k,"UTF-8")).append('=').append(URLEncoder.encode(values.optString(k),"UTF-8"));}
-                        HttpURLConnection c=connection(findNetwork(false),base+payload.getString("endpoint"),10000);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Content-Type","application/x-www-form-urlencoded; charset=utf-8");c.setRequestProperty("Idempotency-Key",op.id);c.getOutputStream().write(body.toString().getBytes(StandardCharsets.UTF_8));
-                        int code=c.getResponseCode();InputStream input=code>=200&&code<300?c.getInputStream():c.getErrorStream();ByteArrayOutputStream bytes=new ByteArrayOutputStream();if(input!=null){byte[] b=new byte[8192];int n;while((n=input.read(b))>0)bytes.write(b,0,n);}String raw=bytes.toString("UTF-8");
-                        if(code==409){JSONObject conflict=new JSONObject(raw);syncDb.conflict(op.id,base,op.itemId,conflict.optJSONObject("item"));runOnUiThread(()->{deletingItems.remove(op.itemId);reloadLocal(base);toast("检测到同步冲突，请处理标记项目");});continue;}
-                        if(code<200||code>=300)throw new IOException("HTTP "+code+" "+raw);
-                        JSONObject item=null;if(!raw.trim().isEmpty()){JSONObject response=new JSONObject(raw);item=response.optJSONObject("item");if(item==null){JSONArray items=response.optJSONArray("items");if(items!=null&&items.length()>0)item=items.optJSONObject(0);}}
-                        syncDb.complete(op.id,base,op.itemId,item);runOnUiThread(()->{deletingItems.remove(op.itemId);reloadLocal(base);});
-                    }catch(Exception e){syncDb.retry(op.id,e.getMessage());retryDelay=Math.min(60000L,1500L*(1L<<Math.min(op.attempts,5)));setStatus("待同步，稍后重试 · "+e.getMessage());break;}
-                }
+                SyncTransferEngine.DrainResult result=syncEngine.drainOperations(base,new SyncTransferEngine.SyncObserver(){
+                    public void syncing(SyncDatabase.Operation operation){runOnUiThread(()->reloadLocal(base));}
+                    public void completed(SyncDatabase.Operation operation,JSONObject item){runOnUiThread(()->{deletingItems.remove(operation.itemId);reloadLocal(base);});}
+                    public void conflict(SyncDatabase.Operation operation){runOnUiThread(()->{deletingItems.remove(operation.itemId);reloadLocal(base);toast("检测到同步冲突，请处理标记项目");});}
+                    public void retrying(SyncDatabase.Operation operation,Exception error){setStatus("待同步，稍后重试 · "+error.getMessage());}
+                });
+                if(result.busy)retryDelay=250;
+                else if(result.error!=null)retryDelay=Math.min(60000L,1500L*(1L<<Math.min(result.retryAttempts,5)));
             }finally{
-                if(lockAcquired)SyncDatabase.endOperations();
                 outboxDrainScheduled.set(false);
                 boolean pending=syncDb.hasOperations(base),conflicts=syncDb.hasConflicts(base),reportComplete=!pending&&outboxStatusPending.getAndSet(false);
                 String route=reportComplete&&!conflicts?syncRoute(activeNetwork):"";
@@ -548,11 +544,10 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==PICK_FILE&&result==RESULT_OK&&data!=null){if(data.getData()!=null)takePersistable(data.getData(),data);if(data.getClipData()!=null){for(int n=0;n<data.getClipData().getItemCount();n++){Uri u=data.getClipData().getItemAt(n).getUri();takePersistable(u,data);upload(u);}}else if(data.getData()!=null)upload(data.getData());}}
     private String displayName(Uri uri){String name=null;try(Cursor c=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst())name=c.getString(0);}catch(Exception ignored){}if(name==null||name.trim().isEmpty())name="upload";if(name.lastIndexOf('.')<=0){String type=getContentResolver().getType(uri);String extension=type==null?null:MimeTypeMap.getSingleton().getExtensionFromMimeType(type.toLowerCase(Locale.ROOT));if(extension!=null&&!extension.isEmpty())name+="."+extension;}return name;}
     private void upload(Uri uri){stageAndUpload(uri);}
-    private void stageAndUpload(Uri uri){String name=displayName(uri),server=activeBase,expiry=pendingExpiry;UploadTaskUi task=new UploadTaskUi(name);toast("已加入持久上传队列："+name);transferIo.execute(()->{File temp=null;try{task.preparing();File dir=new File(getFilesDir(),"pending_uploads");dir.mkdirs();temp=new File(dir,UUID.randomUUID()+".pending");try(InputStream in=getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(temp)){if(in==null)throw new IOException("无法读取文件");byte[]b=new byte[65536];int n;while((n=in.read(b))>0)out.write(b,0,n);}SyncDatabase.PendingUpload upload=syncDb.addUpload(server,temp.getAbsolutePath(),name,expiry);task.bindUploadId(upload.id);uploadPendingFile(upload,task);}catch(Exception e){if(temp!=null)temp.delete();task.failed(name,e.getMessage());}});}
-    private void resumePendingUploads(){for(SyncDatabase.PendingUpload upload:syncDb.uploads(activeBase)){if(!activePendingUploads.add(upload.id))continue;if(!SyncDatabase.beginUpload(upload.id)){activePendingUploads.remove(upload.id);continue;}UploadTaskUi task=new UploadTaskUi(upload.name,upload.id);transferIo.execute(()->uploadPendingFileOwned(upload,task));}}
-    private void uploadPendingFile(SyncDatabase.PendingUpload upload,UploadTaskUi task){if(!activePendingUploads.add(upload.id)||!SyncDatabase.beginUpload(upload.id)){activePendingUploads.remove(upload.id);task.failed(upload.name,"任务已由后台处理");return;}SyncRetryJobService.schedule(this);uploadPendingFileOwned(upload,task);}
-    private void uploadPendingFileOwned(SyncDatabase.PendingUpload upload,UploadTaskUi task){try{uploadFile(upload,task);}finally{SyncDatabase.endUpload(upload.id);activePendingUploads.remove(upload.id);}}
-    private void uploadFile(SyncDatabase.PendingUpload upload,UploadTaskUi task){File file=new File(upload.path);for(int attempt=1;attempt<=3;attempt++){try{if(!upload.server.equals(activeBase))throw new IOException("该任务属于另一服务器");String boundary="----ContentTransfer"+System.currentTimeMillis();HttpURLConnection c=connection(activeNetwork,upload.server+"/upload-stream",30000);c.setReadTimeout(300000);c.setRequestMethod("POST");c.setDoOutput(true);c.setChunkedStreamingMode(65536);c.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);c.setRequestProperty("Idempotency-Key",upload.id);OutputStream out=c.getOutputStream();String safeName=upload.name.replace("\"","").replace("\r"," ").replace("\n"," ");String head="--"+boundary+"\r\nContent-Disposition: form-data; name=\"expiry\"\r\n\r\n"+upload.expiry+"\r\n--"+boundary+"\r\nContent-Disposition: form-data; name=\"file-upload\"; filename=\""+safeName+"\"\r\nContent-Type: application/octet-stream\r\n\r\n";out.write(head.getBytes(StandardCharsets.UTF_8));long total=file.length(),sent=0;try(InputStream in=new FileInputStream(file)){byte[]buf=new byte[65536];int n;while((n=in.read(buf))>0){out.write(buf,0,n);sent+=n;task.uploading(upload.name,sent,total);}}out.write(("\r\n--"+boundary+"--\r\n").getBytes(StandardCharsets.UTF_8));out.close();task.waiting(upload.name);read(c);syncDb.uploadComplete(upload.id);file.delete();task.complete(upload.name);runOnUiThread(this::refresh);return;}catch(Exception e){if(attempt==3){syncDb.uploadFailed(upload.id,e.getMessage());task.failed(upload.name,"待网络恢复后自动重试："+e.getMessage());mainHandler.postDelayed(this::resumePendingUploads,Math.min(60000L,3000L*(upload.attempts+1)));}}}}
+    private void stageAndUpload(Uri uri){String name=displayName(uri),server=activeBase,expiry=pendingExpiry;UploadTaskUi task=new UploadTaskUi(name);toast("已加入持久上传队列："+name);transferIo.execute(()->{File temp=null;try{task.preparing();temp=syncEngine.stage(uri,name);SyncDatabase.PendingUpload upload=syncDb.addUpload(server,temp.getAbsolutePath(),name,expiry);task.bindUploadId(upload.id);uploadPendingFile(upload,task);}catch(Exception e){if(temp!=null)temp.delete();task.failed(name,e.getMessage());}});}
+    private void resumePendingUploads(){for(SyncDatabase.PendingUpload upload:syncDb.uploads(activeBase)){UploadTaskUi task=findUploadTask(upload.name,upload.id);if(task==null)task=new UploadTaskUi(upload.name,upload.id);UploadTaskUi pendingTask=task;transferIo.execute(()->uploadPendingFile(upload,pendingTask));}}
+    private void uploadPendingFile(SyncDatabase.PendingUpload upload,UploadTaskUi task){if(!uploadExecutions.add(upload.id))return;try{uploadPendingFileOwned(upload,task);}finally{uploadExecutions.remove(upload.id);}}
+    private void uploadPendingFileOwned(SyncDatabase.PendingUpload upload,UploadTaskUi task){SyncRetryJobService.schedule(this);try{if(!upload.server.equals(activeBase))throw new IOException("该任务属于另一服务器");SyncTransferEngine.UploadResult result=syncEngine.upload(upload,3,new SyncTransferEngine.UploadObserver(){public void uploading(SyncDatabase.PendingUpload value,long sent,long total){task.uploading(value.name,sent,total);}public void waiting(SyncDatabase.PendingUpload value){task.waiting(value.name);}});if(result.busy){mainHandler.postDelayed(()->{if(syncDb.hasUpload(upload.id))resumePendingUploads();else{task.complete(upload.name);refresh();}},1000);return;}task.complete(result.savedName);runOnUiThread(this::refresh);}catch(Exception error){task.failed(upload.name,"待网络恢复后自动重试："+error.getMessage());mainHandler.postDelayed(this::resumePendingUploads,Math.min(60000L,3000L*(upload.attempts+1)));}}
 
     private String downloadName(String filename){
         if(filename==null||filename.trim().isEmpty())return "download.bin";
