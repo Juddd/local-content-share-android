@@ -1,7 +1,6 @@
 package ink.yode.contenttransfer;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.net.Uri;
 
 final class ServerConfig {

@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Durable per-server cache and outbox. Payloads are JSON to keep migrations small and lossless. */
 final class SyncDatabase extends SQLiteOpenHelper {
     static final String SYNCED="synced", PENDING="pending", SYNCING="syncing", CONFLICT="conflict";
-    static final class Operation { String id,itemId,type,payload; long baseRevision,createdAt; int attempts; }
+    static final class Operation { String id,itemId,type,payload; long baseRevision; int attempts; }
     static final class PendingUpload { String id,server,path,name,expiry; int attempts; }
     private static final AtomicBoolean OPERATIONS_DRAINING=new AtomicBoolean();
     private static final Set<String> UPLOADS_IN_FLIGHT=Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -40,7 +40,7 @@ final class SyncDatabase extends SQLiteOpenHelper {
     synchronized void applyRemote(String server,String oldId,JSONObject item)throws JSONException {if(hasPending(server,oldId)||hasPending(server,item.getString("id")))return;SQLiteDatabase db=getWritableDatabase();db.delete("items","server=? AND id=?",new String[]{server,oldId});putItem(db,server,item,SYNCED,null);}
     synchronized void applyDelete(String server,String id){if(!hasPending(server,id))removeLocal(server,id);}
     synchronized String enqueue(String server,String itemId,String type,JSONObject payload,long baseRevision)throws JSONException {String operationId=UUID.randomUUID().toString();ContentValues v=new ContentValues();v.put("operation_id",operationId);v.put("server",server);v.put("item_id",itemId);v.put("type",type);v.put("payload_json",payload.toString());v.put("base_revision",baseRevision);v.put("created_at",System.currentTimeMillis());getWritableDatabase().insertOrThrow("pending_operations",null,v);return operationId;}
-    synchronized Operation next(String server){try(Cursor c=getReadableDatabase().rawQuery("SELECT operation_id,item_id,type,payload_json,base_revision,created_at,attempts FROM pending_operations WHERE server=? ORDER BY created_at LIMIT 1",new String[]{server})){if(!c.moveToFirst())return null;Operation o=new Operation();o.id=c.getString(0);o.itemId=c.getString(1);o.type=c.getString(2);o.payload=c.getString(3);o.baseRevision=c.getLong(4);o.createdAt=c.getLong(5);o.attempts=c.getInt(6);return o;}}
+    synchronized Operation next(String server){try(Cursor c=getReadableDatabase().rawQuery("SELECT operation_id,item_id,type,payload_json,base_revision,attempts FROM pending_operations WHERE server=? ORDER BY created_at LIMIT 1",new String[]{server})){if(!c.moveToFirst())return null;Operation o=new Operation();o.id=c.getString(0);o.itemId=c.getString(1);o.type=c.getString(2);o.payload=c.getString(3);o.baseRevision=c.getLong(4);o.attempts=c.getInt(5);return o;}}
     synchronized boolean hasOperations(String server){try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM pending_operations WHERE server=? LIMIT 1",new String[]{server})){return c.moveToFirst();}}
     synchronized boolean hasConflicts(String server){try(Cursor c=getReadableDatabase().rawQuery("SELECT 1 FROM items WHERE server=? AND sync_state=? LIMIT 1",new String[]{server,CONFLICT})){return c.moveToFirst();}}
     synchronized void syncing(String server,String id){state(server,id,SYNCING,null);}
