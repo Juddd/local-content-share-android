@@ -1,3 +1,4 @@
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
 package ink.yode.contenttransfer;
 
 import android.graphics.Color;

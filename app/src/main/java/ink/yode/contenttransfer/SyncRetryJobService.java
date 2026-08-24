@@ -1,3 +1,4 @@
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
 package ink.yode.contenttransfer;
 
 import android.app.job.*;
@@ -35,8 +36,9 @@ public class SyncRetryJobService extends JobService {
             JSONObject item=null;if(!result.body.trim().isEmpty()){JSONObject response=new JSONObject(result.body);item=response.optJSONObject("item");if(item==null){JSONArray items=response.optJSONArray("items");if(items!=null&&items.length()>0)item=items.optJSONObject(0);}}
             db.complete(op.id,server,op.itemId,item);
         }catch(Exception error){db.retry(op.id,error.getMessage());return false;}}}finally{SyncDatabase.endOperations();}
-        for(SyncDatabase.PendingUpload pending:db.uploads(server)){if(!SyncDatabase.beginUpload(pending.id))continue;try{upload(server,pending);db.uploadComplete(pending.id);new File(pending.path).delete();}catch(Exception error){db.uploadFailed(pending.id,error.getMessage());return false;}finally{SyncDatabase.endUpload(pending.id);}}
-        return true;
+        boolean uploadBusy=false;
+        for(SyncDatabase.PendingUpload pending:db.uploads(server)){if(!SyncDatabase.beginUpload(pending.id)){uploadBusy=true;continue;}try{upload(server,pending);db.uploadComplete(pending.id);new File(pending.path).delete();}catch(Exception error){db.uploadFailed(pending.id,error.getMessage());return false;}finally{SyncDatabase.endUpload(pending.id);}}
+        return !uploadBusy;
     }
 
     private static final class Result{int code;String body;Result(int c,String b){code=c;body=b;}}

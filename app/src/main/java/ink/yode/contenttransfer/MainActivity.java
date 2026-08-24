@@ -1,3 +1,4 @@
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
 package ink.yode.contenttransfer;
 
 import android.app.*;
@@ -13,6 +14,7 @@ import android.util.LruCache;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.ColorDrawable;
 import android.net.*;
 import android.os.*;
 import android.provider.MediaStore;
@@ -72,11 +74,30 @@ public class MainActivity extends Activity {
     private ProgressBar uploadProgressBar;
     private int activeUploadCount;
     private final Set<String> activePendingUploads=Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Map<String, UploadTaskUi> uploadTaskUis = new ConcurrentHashMap<>();
     private boolean uploadDialogSuppressed;
     private boolean shareProgressReceiverRegistered;
     private boolean networkCallbackRegistered;
     private final ConnectivityManager.NetworkCallback networkCallback=new ConnectivityManager.NetworkCallback(){@Override public void onAvailable(Network network){mainHandler.post(()->{drainOutbox();resumePendingUploads();});}};
-    private final BroadcastReceiver shareProgressReceiver=new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){String message=intent.getStringExtra("message");if(message==null)return;boolean finished=intent.getBooleanExtra("finished",false),indeterminate=intent.getBooleanExtra("indeterminate",false);long sent=intent.getLongExtra("sent",0),total=intent.getLongExtra("total",0);if(!finished&&uploadProgressDialog==null)uploadDialogSuppressed=false;showUploadProgress(message,sent,indeterminate?-1:total);if(finished)mainHandler.postDelayed(()->{if(uploadProgressDialog!=null){uploadProgressDialog.dismiss();uploadProgressDialog=null;}},2500);}};
+    private final BroadcastReceiver shareProgressReceiver=new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){
+        String message=intent.getStringExtra("message");if(message==null)return;
+        String name=intent.getStringExtra("name"),uploadId=intent.getStringExtra("uploadId"),savedName=intent.getStringExtra("savedName");
+        boolean finished=intent.getBooleanExtra("finished",false),indeterminate=intent.getBooleanExtra("indeterminate",false);
+        long sent=intent.getLongExtra("sent",0),total=intent.getLongExtra("total",0);
+        if(!finished&&uploadProgressDialog==null)uploadDialogSuppressed=false;
+        showUploadProgress(message,sent,indeterminate?-1:total);
+        if(name!=null&&!name.isEmpty()){
+            UploadTaskUi task=findUploadTask(name,uploadId);
+            if(task==null)task=new UploadTaskUi(name,uploadId);
+            if(finished){
+                if(message.contains("已上传到 Files"))task.complete(savedName==null||savedName.isEmpty()?name:savedName);
+                else task.failed(name,message);
+            }else if(indeterminate){
+                if(message.contains("等待 NAS 保存"))task.waiting(name);else task.preparing();
+            }else task.uploading(name,sent,total);
+        }
+        if(finished)mainHandler.postDelayed(()->{if(uploadProgressDialog!=null){uploadProgressDialog.dismiss();uploadProgressDialog=null;}},2500);
+    }};
     private volatile boolean realtimeEnabled;
     private volatile int realtimeGeneration;
     private volatile HttpURLConnection realtimeConnection;
@@ -84,7 +105,7 @@ public class MainActivity extends Activity {
     private volatile int serverGeneration;
     private SyncDatabase syncDb;
     private final Runnable realtimeRefresh = this::refresh;
-    private AlertDialog deviceCenterDialog;
+    private Dialog deviceCenterDialog;
     private LinearLayout deviceCenterList;
     private TextView deviceCenterStatus;
     private TextView deviceStrip;
@@ -116,9 +137,14 @@ public class MainActivity extends Activity {
         final LinearLayout row;
         final TextView label;
         final ProgressBar progress;
-        UploadTaskUi(String name) {
+        final String taskName;
+        String uploadId;
+        UploadTaskUi(String name) { this(name,null); }
+        UploadTaskUi(String name,String id) {
+            taskName=name;uploadId=id;
             if(activeUploadCount==0)uploadDialogSuppressed=false;
             activeUploadCount++;
+            registerUploadTask(this);
             showUploadProgress(name+" · 等待处理",0,-1);
             row=new LinearLayout(MainActivity.this);row.setOrientation(LinearLayout.VERTICAL);row.setPadding(dp(12),dp(7),dp(12),dp(7));row.setBackground(rounded(Color.rgb(245,241,247),12));
             label=text(name+" · 等待处理",13,Color.rgb(73,62,80));label.setPadding(0,0,0,dp(4));row.addView(label);
@@ -130,9 +156,14 @@ public class MainActivity extends Activity {
         void waiting(String name){runOnUiThread(()->{String value=name+" · 等待 NAS 保存";progress.setIndeterminate(true);label.setText(value);showUploadProgress(value,0,-1);});}
         void complete(String name){finish(name+" · 已上传到 Files",Color.rgb(34,139,70),100);}
         void failed(String name,String error){finish(name+" · 失败："+error,Color.rgb(180,40,40),0);}
+        void bindUploadId(String id){if(id==null||id.isEmpty()||id.equals(uploadId))return;uploadId=id;uploadTaskUis.put(id,this);}
         private String labelName(){String value=label.getText().toString();int split=value.indexOf(" · ");return split<0?value:value.substring(0,split);}
-        private void finish(String textValue,int color,int value){runOnUiThread(()->{progress.setIndeterminate(false);progress.setProgress(value);label.setText(textValue);label.setTextColor(color);showUploadProgress(textValue,value,100);activeUploadCount=Math.max(0,activeUploadCount-1);if(activeUploadCount==0)mainHandler.postDelayed(()->{if(activeUploadCount==0&&uploadProgressDialog!=null){uploadProgressDialog.dismiss();uploadProgressDialog=null;}},2500);mainHandler.postDelayed(()->{uploadTasks.removeView(row);if(uploadTasks.getChildCount()==0)uploadPanel.setVisibility(View.GONE);},10000);});}
+        private void finish(String textValue,int color,int value){runOnUiThread(()->{progress.setIndeterminate(false);progress.setProgress(value);label.setText(textValue);label.setTextColor(color);showUploadProgress(textValue,value,100);activeUploadCount=Math.max(0,activeUploadCount-1);removeUploadTask(this);if(activeUploadCount==0)mainHandler.postDelayed(()->{if(activeUploadCount==0&&uploadProgressDialog!=null){uploadProgressDialog.dismiss();uploadProgressDialog=null;}},2500);mainHandler.postDelayed(()->{uploadTasks.removeView(row);if(uploadTasks.getChildCount()==0)uploadPanel.setVisibility(View.GONE);},10000);});}
     }
+
+    private void registerUploadTask(UploadTaskUi task){if(task.uploadId!=null&&!task.uploadId.isEmpty())uploadTaskUis.put(task.uploadId,task);uploadTaskUis.putIfAbsent(task.taskName,task);}
+    private UploadTaskUi findUploadTask(String name,String uploadId){UploadTaskUi task=null;if(uploadId!=null&&!uploadId.isEmpty())task=uploadTaskUis.get(uploadId);if(task==null&&name!=null)task=uploadTaskUis.get(name);return task;}
+    private void removeUploadTask(UploadTaskUi task){if(task.uploadId!=null&&!task.uploadId.isEmpty())uploadTaskUis.remove(task.uploadId,task);uploadTaskUis.remove(task.taskName,task);}
 
     static class Item {
         String id, storageId, type, filename, content, createdAt, modifiedAt, syncState="synced";
@@ -200,6 +231,7 @@ public class MainActivity extends Activity {
         if (value.startsWith("1.0.61\n")) value="1.0.62\n• 恢复同步成功提示中的局域网或外网标识\n• 保留操作完成后自动从待同步切换为已同步的修复\n\n"+value;
         if (value.startsWith("1.0.62\n")) value="1.0.63\n• 新增设备中心，可查看在线、后台和离线的网页客户端\n• 支持给浏览器设备重命名、远程关闭并锁定或解除锁定\n• 锁定覆盖同一浏览器配置的所有标签页，刷新后仍显示 404\n• 设备身份不使用浏览器指纹，名称和锁定状态由 NAS 永久保存\n\n"+value;
         if (value.startsWith("1.0.63\n")) value="1.0.64\n• 有浏览器设备时，各内容区顶部显示设备状态窄条\n• 设备列表用图标直接重命名、关闭锁定或解除锁定\n• IP 地址标明相对于 NAS 的局域网或外网类型\n• 超过 30 天未活动且已离线的浏览器设备自动清理\n\n"+value;
+        if (value.startsWith("1.0.64\n")) value="1.0.65\n• 设备列表改为从底部滑入的全窗口页面\n• 设备窄条只显示在文字、文件和链接区\n• 系统分享上传与主界面任务卡统一实时进度\n• 修复文件已上传但任务仍停留在等待处理的问题\n• 后台重试不再与正在执行的分享上传争抢任务\n\n"+value;
         TextView v = new TextView(this); v.setText(value); v.setTextSize(sp); v.setTextColor(color); v.setPadding(dp(12),dp(10),dp(12),dp(10)); return v;
     }
     private GradientDrawable rounded(int color,int radius) { GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d; }
@@ -362,6 +394,7 @@ public class MainActivity extends Activity {
     private void applyRemoteItem(String oldId,Item updated){if(updated==null)return;try{syncDb.applyRemote(activeBase,oldId,updated.json());}catch(Exception ignored){}if(syncDb.hasPending(activeBase,oldId)||syncDb.hasPending(activeBase,updated.id)){reloadLocal(activeBase);return;}allItems.removeIf(item->item.id.equals(oldId)||item.id.equals(updated.id));allItems.add(updated);renderSection();}
 
     private void renderSection() {
+        updateDeviceStrip();
         if(section.equals("notepad")){ showNotepad(); return; }
         if(notepad!=null){root.removeView(notepad);notepad=null;if(notepadPreviewScroll!=null){root.removeView(notepadPreviewScroll);notepadPreviewScroll=null;notepadPreview=null;}if(notepadActions!=null){root.removeView(notepadActions);notepadActions=null;notepadRead=null;notepadSave=null;}if(list.getParent()==null)root.addView(list,new LinearLayout.LayoutParams(-1,0,1));}
         visibleItems.clear(); for(Item i:allItems) if(i.type.equals(section)) visibleItems.add(i);
@@ -518,9 +551,10 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==PICK_FILE&&result==RESULT_OK&&data!=null){if(data.getData()!=null)takePersistable(data.getData(),data);if(data.getClipData()!=null){for(int n=0;n<data.getClipData().getItemCount();n++){Uri u=data.getClipData().getItemAt(n).getUri();takePersistable(u,data);upload(u);}}else if(data.getData()!=null)upload(data.getData());}}
     private String displayName(Uri uri){String name=null;try(Cursor c=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst())name=c.getString(0);}catch(Exception ignored){}if(name==null||name.trim().isEmpty())name="upload";if(name.lastIndexOf('.')<=0){String type=getContentResolver().getType(uri);String extension=type==null?null:MimeTypeMap.getSingleton().getExtensionFromMimeType(type.toLowerCase(Locale.ROOT));if(extension!=null&&!extension.isEmpty())name+="."+extension;}return name;}
     private void upload(Uri uri){stageAndUpload(uri);}
-    private void stageAndUpload(Uri uri){String name=displayName(uri),server=activeBase,expiry=pendingExpiry;UploadTaskUi task=new UploadTaskUi(name);toast("已加入持久上传队列："+name);transferIo.execute(()->{File temp=null;try{task.preparing();File dir=new File(getFilesDir(),"pending_uploads");dir.mkdirs();temp=new File(dir,UUID.randomUUID()+".pending");try(InputStream in=getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(temp)){if(in==null)throw new IOException("无法读取文件");byte[]b=new byte[65536];int n;while((n=in.read(b))>0)out.write(b,0,n);}SyncDatabase.PendingUpload upload=syncDb.addUpload(server,temp.getAbsolutePath(),name,expiry);SyncRetryJobService.schedule(this);uploadPendingFile(upload,task);}catch(Exception e){if(temp!=null)temp.delete();task.failed(name,e.getMessage());}});}
-    private void resumePendingUploads(){for(SyncDatabase.PendingUpload upload:syncDb.uploads(activeBase)){if(!activePendingUploads.add(upload.id))continue;UploadTaskUi task=new UploadTaskUi(upload.name);transferIo.execute(()->uploadPendingFile(upload,task));}}
-    private void uploadPendingFile(SyncDatabase.PendingUpload upload,UploadTaskUi task){if(!SyncDatabase.beginUpload(upload.id)){activePendingUploads.remove(upload.id);return;}activePendingUploads.add(upload.id);try{uploadFile(upload,task);}finally{SyncDatabase.endUpload(upload.id);activePendingUploads.remove(upload.id);}}
+    private void stageAndUpload(Uri uri){String name=displayName(uri),server=activeBase,expiry=pendingExpiry;UploadTaskUi task=new UploadTaskUi(name);toast("已加入持久上传队列："+name);transferIo.execute(()->{File temp=null;try{task.preparing();File dir=new File(getFilesDir(),"pending_uploads");dir.mkdirs();temp=new File(dir,UUID.randomUUID()+".pending");try(InputStream in=getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(temp)){if(in==null)throw new IOException("无法读取文件");byte[]b=new byte[65536];int n;while((n=in.read(b))>0)out.write(b,0,n);}SyncDatabase.PendingUpload upload=syncDb.addUpload(server,temp.getAbsolutePath(),name,expiry);task.bindUploadId(upload.id);uploadPendingFile(upload,task);}catch(Exception e){if(temp!=null)temp.delete();task.failed(name,e.getMessage());}});}
+    private void resumePendingUploads(){for(SyncDatabase.PendingUpload upload:syncDb.uploads(activeBase)){if(!activePendingUploads.add(upload.id))continue;if(!SyncDatabase.beginUpload(upload.id)){activePendingUploads.remove(upload.id);continue;}UploadTaskUi task=new UploadTaskUi(upload.name,upload.id);transferIo.execute(()->uploadPendingFileOwned(upload,task));}}
+    private void uploadPendingFile(SyncDatabase.PendingUpload upload,UploadTaskUi task){if(!activePendingUploads.add(upload.id)||!SyncDatabase.beginUpload(upload.id)){activePendingUploads.remove(upload.id);task.failed(upload.name,"任务已由后台处理");return;}SyncRetryJobService.schedule(this);uploadPendingFileOwned(upload,task);}
+    private void uploadPendingFileOwned(SyncDatabase.PendingUpload upload,UploadTaskUi task){try{uploadFile(upload,task);}finally{SyncDatabase.endUpload(upload.id);activePendingUploads.remove(upload.id);}}
     private void uploadFile(SyncDatabase.PendingUpload upload,UploadTaskUi task){File file=new File(upload.path);for(int attempt=1;attempt<=3;attempt++){try{if(!upload.server.equals(activeBase))throw new IOException("该任务属于另一服务器");String boundary="----ContentTransfer"+System.currentTimeMillis();HttpURLConnection c=connection(activeNetwork,upload.server+"/upload-stream",30000);c.setReadTimeout(300000);c.setRequestMethod("POST");c.setDoOutput(true);c.setChunkedStreamingMode(65536);c.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);c.setRequestProperty("Idempotency-Key",upload.id);OutputStream out=c.getOutputStream();String safeName=upload.name.replace("\"","").replace("\r"," ").replace("\n"," ");String head="--"+boundary+"\r\nContent-Disposition: form-data; name=\"expiry\"\r\n\r\n"+upload.expiry+"\r\n--"+boundary+"\r\nContent-Disposition: form-data; name=\"file-upload\"; filename=\""+safeName+"\"\r\nContent-Type: application/octet-stream\r\n\r\n";out.write(head.getBytes(StandardCharsets.UTF_8));long total=file.length(),sent=0;try(InputStream in=new FileInputStream(file)){byte[]buf=new byte[65536];int n;while((n=in.read(buf))>0){out.write(buf,0,n);sent+=n;task.uploading(upload.name,sent,total);}}out.write(("\r\n--"+boundary+"--\r\n").getBytes(StandardCharsets.UTF_8));out.close();task.waiting(upload.name);read(c);syncDb.uploadComplete(upload.id);file.delete();task.complete(upload.name);runOnUiThread(this::refresh);return;}catch(Exception e){if(attempt==3){syncDb.uploadFailed(upload.id,e.getMessage());task.failed(upload.name,"待网络恢复后自动重试："+e.getMessage());mainHandler.postDelayed(this::resumePendingUploads,Math.min(60000L,3000L*(upload.attempts+1)));}}}}
 
     private String downloadName(String filename){
@@ -567,13 +601,17 @@ public class MainActivity extends Activity {
 
     private void showDeviceCenter(){
         if(activeBase.isEmpty()){toast("请先配置服务器地址");return;}
-        LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setPadding(dp(14),dp(14),dp(14),0);
+        LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setPadding(dp(14),0,dp(14),0);page.setBackgroundColor(Color.rgb(250,247,252));
+        page.setOnApplyWindowInsetsListener((view,insets)->{int top=Build.VERSION.SDK_INT>=30?insets.getInsets(WindowInsets.Type.statusBars()).top:insets.getSystemWindowInsetTop();int bottom=Build.VERSION.SDK_INT>=30?insets.getInsets(WindowInsets.Type.navigationBars()).bottom:insets.getSystemWindowInsetBottom();view.setPadding(dp(14),top+dp(10),dp(14),bottom);return insets;});
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);TextView close=iconButton("×","关闭设备列表");close.setOnClickListener(v->deviceCenterDialog.dismiss());header.addView(close,new LinearLayout.LayoutParams(dp(44),dp(44)));TextView heading=text("浏览器设备",18,Color.rgb(45,39,49));heading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);heading.setGravity(Gravity.CENTER);header.addView(heading,new LinearLayout.LayoutParams(0,dp(44),1));TextView spacer=text("",18,Color.TRANSPARENT);header.addView(spacer,new LinearLayout.LayoutParams(dp(44),dp(44)));page.addView(header);
         deviceCenterStatus=text("正在读取设备…",13,Color.rgb(96,87,101));deviceCenterStatus.setPadding(dp(4),dp(2),dp(4),dp(8));page.addView(deviceCenterStatus);
         deviceCenterList=new LinearLayout(this);deviceCenterList.setOrientation(LinearLayout.VERTICAL);
-        ScrollView scroll=new ScrollView(this);scroll.addView(deviceCenterList);page.addView(scroll,new LinearLayout.LayoutParams(-1,dp(470)));
-        deviceCenterDialog=new AlertDialog.Builder(this).setView(page).setNegativeButton("关闭",null).create();
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.addView(deviceCenterList);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        deviceCenterDialog=new Dialog(this);deviceCenterDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);deviceCenterDialog.setContentView(page);deviceCenterDialog.setCancelable(true);
         deviceCenterDialog.setOnDismissListener(d->{deviceCenterDialog=null;deviceCenterList=null;deviceCenterStatus=null;});
-        deviceCenterDialog.show();renderDevices(cachedDevices);loadDeviceSummary();
+        deviceCenterDialog.show();Window window=deviceCenterDialog.getWindow();if(window!=null){window.setBackgroundDrawable(new ColorDrawable(Color.rgb(250,247,252)));window.setGravity(Gravity.BOTTOM);window.setLayout(WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT);}
+        page.post(()->{page.setTranslationY(page.getHeight());page.animate().translationY(0).setDuration(280).start();});
+        renderDevices(cachedDevices);loadDeviceSummary();
     }
 
     private void loadDeviceSummary(){
@@ -586,7 +624,7 @@ public class MainActivity extends Activity {
         }catch(Exception e){runOnUiThread(()->{deviceSummaryLoading=false;if(deviceCenterStatus!=null)deviceCenterStatus.setText("读取失败 · "+e.getMessage());if(deviceSummaryActive)mainHandler.postDelayed(deviceSummaryPoll,5000);});}});
     }
 
-    private void updateDeviceStrip(){if(deviceStrip==null)return;int count=cachedDevices.length();deviceStrip.setVisibility(count==0?View.GONE:View.VISIBLE);if(count>0)deviceStrip.setText("共 "+count+" 台浏览器设备 · 每 5 秒更新");}
+    private void updateDeviceStrip(){if(deviceStrip==null)return;int count=cachedDevices.length();if(section.equals("notepad")||count==0){deviceStrip.setVisibility(View.GONE);return;}deviceStrip.setVisibility(View.VISIBLE);deviceStrip.setText("共 "+count+" 台浏览器设备 · 每 5 秒更新");}
 
     private void renderDevices(JSONArray devices){
         if(deviceCenterList==null)return;deviceCenterList.removeAllViews();

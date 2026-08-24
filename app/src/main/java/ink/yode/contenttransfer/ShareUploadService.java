@@ -1,3 +1,4 @@
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
 package ink.yode.contenttransfer;
 
 import android.app.Notification;
@@ -38,6 +39,9 @@ public class ShareUploadService extends Service {
     public static final String EXTRA_URIS = "uris";
     public static final String EXTRA_NAMES = "names";
     public static final String EXTRA_TEXT = "text";
+    public static final String EXTRA_NAME = "name";
+    public static final String EXTRA_UPLOAD_ID = "uploadId";
+    public static final String EXTRA_SAVED_NAME = "savedName";
     private static final String CHANNEL_ID = "share-uploads";
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -98,19 +102,22 @@ public class ShareUploadService extends Service {
                 SyncDatabase.PendingUpload pending=null;
                 boolean completed=false;
                 int position = index + 1;
+                String taskId=UUID.randomUUID().toString();
                 try {
-                    updateProgress("正在准备 " + position + "/" + count + " · " + name, 0, 0, true);
+                    updateProgress("正在准备 " + position + "/" + count + " · " + name, 0, 0, true, name, taskId);
                     file=stage(Uri.parse(uris.get(index)),name);
-                    pending=syncDb.addUpload(baseUrl,file.getAbsolutePath(),name,"Never");SyncRetryJobService.schedule(this);
+                    pending=syncDb.addUpload(baseUrl,file.getAbsolutePath(),name,"Never");
+                    updateProgress("正在准备 " + position + "/" + count + " · " + name, 0, 0, true, name, taskId);
                     if(!SyncDatabase.beginUpload(pending.id))throw new IOException("后台上传任务正在运行");
-                    String savedName;try{savedName=uploadWithRetry(baseUrl,file, name, position, count,pending.id);syncDb.uploadComplete(pending.id);completed=true;}finally{SyncDatabase.endUpload(pending.id);}
-                    broadcastProgress(savedName + " · 已上传到 Files", 100, 100, false, true);
+                    SyncRetryJobService.schedule(this);
+                    String savedName;try{savedName=uploadWithRetry(baseUrl,file, name, position, count,pending.id,taskId);syncDb.uploadComplete(pending.id);completed=true;}finally{SyncDatabase.endUpload(pending.id);}
+                    broadcastProgress(savedName + " · 已上传到 Files", 100, 100, false, true, name, taskId, savedName);
                     main.post(() -> Toast.makeText(this,
                             savedName + " 已发送到 Files", Toast.LENGTH_LONG).show());
                 } catch (Exception error) {
                     if(pending!=null)syncDb.uploadFailed(pending.id,error.getMessage());SyncRetryJobService.schedule(this);
                     String feedback=pending==null?name+" 准备失败："+error.getMessage():name+" 已加入待上传队列，联网后自动发送";
-                    broadcastProgress(feedback, 0, 100, false, true);
+                    broadcastProgress(feedback, 0, 100, false, true, name, taskId, null);
                     main.post(() -> Toast.makeText(this,
                             feedback, Toast.LENGTH_LONG).show());
                 } finally {
@@ -152,16 +159,16 @@ public class ShareUploadService extends Service {
         return result;
     }
 
-    private String uploadWithRetry(String baseUrl,File file, String name, int position, int totalFiles,String idempotencyKey) throws Exception {
+    private String uploadWithRetry(String baseUrl,File file, String name, int position, int totalFiles,String idempotencyKey,String taskId) throws Exception {
         Exception failure = null;
         for (int attempt = 1; attempt <= 3; attempt++) {
-            try { return upload(baseUrl,file, name, position, totalFiles,idempotencyKey); }
+            try { return upload(baseUrl,file, name, position, totalFiles,idempotencyKey,taskId); }
             catch (Exception error) { failure = error; }
         }
         throw failure == null ? new Exception("未知错误") : failure;
     }
 
-    private String upload(String baseUrl,File file, String name, int position, int totalFiles,String idempotencyKey) throws Exception {
+    private String upload(String baseUrl,File file, String name, int position, int totalFiles,String idempotencyKey,String taskId) throws Exception {
         String boundary = "----ContentTransfer" + System.nanoTime();
         HttpURLConnection connection = (HttpURLConnection) new URL(baseUrl + "/upload-stream").openConnection();
         connection.setConnectTimeout(30000);
@@ -188,13 +195,13 @@ public class ShareUploadService extends Service {
                     int percent = file.length() > 0 ? (int)Math.min(99, sent * 100 / file.length()) : 0;
                     if (percent != lastPercent) {
                         lastPercent = percent;
-                        updateProgress("正在上传 " + position + "/" + totalFiles + " · " + name, sent, file.length(), false);
+                        updateProgress("正在上传 " + position + "/" + totalFiles + " · " + name, sent, file.length(), false, name, taskId);
                     }
                 }
             }
             out.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
         }
-        updateProgress("等待 NAS 保存 " + position + "/" + totalFiles + " · " + name, 0, 0, true);
+        updateProgress("等待 NAS 保存 " + position + "/" + totalFiles + " · " + name, 0, 0, true, name, taskId);
         int code = connection.getResponseCode();
         InputStream response = code >= 200 && code < 300
                 ? connection.getInputStream() : connection.getErrorStream();
@@ -222,7 +229,7 @@ public class ShareUploadService extends Service {
                 .build();
     }
 
-    private void updateProgress(String text, long sent, long total, boolean indeterminate) {
+    private void updateProgress(String text, long sent, long total, boolean indeterminate, String name, String uploadId) {
         int percent = total > 0 ? (int)Math.min(99, sent * 100 / total) : 0;
         String detail = indeterminate || total <= 0 ? text : text + " · " + percent + "%（" + formatSize(sent) + " / " + formatSize(total) + "）";
         Notification notification = new Notification.Builder(this, CHANNEL_ID)
@@ -235,16 +242,19 @@ public class ShareUploadService extends Service {
                 .setProgress(100, percent, indeterminate || total <= 0)
                 .build();
         notificationManager.notify(2401, notification);
-        broadcastProgress(text, sent, total, indeterminate, false);
+        broadcastProgress(text, sent, total, indeterminate, false, name, uploadId, null);
     }
 
-    private void broadcastProgress(String text, long sent, long total, boolean indeterminate, boolean finished) {
+    private void broadcastProgress(String text, long sent, long total, boolean indeterminate, boolean finished, String name, String uploadId, String savedName) {
         Intent progress = new Intent(ACTION_UPLOAD_PROGRESS).setPackage(getPackageName());
         progress.putExtra("message", text);
         progress.putExtra("sent", sent);
         progress.putExtra("total", total);
         progress.putExtra("indeterminate", indeterminate);
         progress.putExtra("finished", finished);
+        if(name!=null)progress.putExtra(EXTRA_NAME,name);
+        if(uploadId!=null)progress.putExtra(EXTRA_UPLOAD_ID,uploadId);
+        if(savedName!=null)progress.putExtra(EXTRA_SAVED_NAME,savedName);
         sendBroadcast(progress);
     }
 
