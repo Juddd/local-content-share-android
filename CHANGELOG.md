@@ -1,4 +1,3 @@
-warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
 # 内容中转 Android App 版本记录
 
 ## 1.0.67

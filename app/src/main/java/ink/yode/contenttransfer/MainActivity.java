@@ -278,8 +278,7 @@ public class MainActivity extends Activity {
         uploadTasks=new LinearLayout(this);uploadTasks.setOrientation(LinearLayout.VERTICAL);uploadPanel.addView(uploadTasks,new LinearLayout.LayoutParams(-1,-2));
         LinearLayout.LayoutParams uploadPanelParams=new LinearLayout.LayoutParams(-1,-2);uploadPanelParams.setMargins(0,0,0,dp(8));root.addView(uploadPanel,uploadPanelParams);
         deviceStrip=text("",13,Color.rgb(73,62,80));deviceStrip.setGravity(Gravity.CENTER_VERTICAL);deviceStrip.setPadding(dp(12),0,dp(12),0);deviceStrip.setBackground(rounded(Color.rgb(239,234,242),8));deviceStrip.setVisibility(View.GONE);deviceStrip.setOnClickListener(v->showDeviceCenter());
-        LinearLayout.LayoutParams deviceStripParams=new LinearLayout.LayoutParams(-1,dp(38));deviceStripParams.setMargins(0,0,0,dp(7));root.addView(deviceStrip,deviceStrwarning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-ipParams);
+        LinearLayout.LayoutParams deviceStripParams=new LinearLayout.LayoutParams(-1,dp(38));deviceStripParams.setMargins(0,0,0,dp(7));root.addView(deviceStrip,deviceStripParams);
         list=new ListView(this); adapter=new ItemAdapter(); list.setAdapter(adapter); root.addView(list,new LinearLayout.LayoutParams(-1,0,1));
         swipeRefresh = new SwipeRefreshLayout(this);
         swipeRefresh.setColorSchemeColors(Color.rgb(103,80,164));
