@@ -33,16 +33,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=v1.0.66
-          apk=content-transfer-v1.0.66.apk
+          tag=v1.0.67
+          apk=content-transfer-v1.0.67.apk
           curl --fail --location --retry 6 --retry-all-errors --retry-delay 5 -o "$apk" \
             "http://nas.yode.ink:8084/download/files/$apk"
-          echo "32e3fda957fc891841fafd25cdcbd763347608c6592ee32910807fcc1b24476b  $apk" | sha256sum --check
+          echo "d34a620fbbf3bf8475d928440195b689d29c381e2d22c7fa8832a99e9d530f5c  $apk" | sha256sum --check
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$apk" --clobber
           else
             gh release create "$tag" "$apk" \
               --target "$GITHUB_SHA" \
-              --title "内容中转 Android 1.0.66" \
-              --notes "离线操作、后台重试和文件上传统一由一个同步传输引擎执行；前台、系统分享与 JobScheduler 共用同一任务状态；修复并发接手上传时任务卡可能停在等待处理的问题；服务端内容生命周期与文件事务模块同步升级。使用原生产证书签名，可覆盖升级。"
+              --title "内容中转 Android 1.0.67" \
+              --notes "修复开启 VPN 时主界面同步强行绑定底层 Wi-Fi、出现 Binding socket EPERM 的问题；VPN 生效时同步、实时更新与传输统一遵循 Android 系统默认网络；Snippet 查看正文支持长按选中和局部复制，同时保持只读。使用原生产证书签名，可覆盖升级。"
           fi

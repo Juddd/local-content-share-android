@@ -76,7 +76,7 @@ public class MainActivity extends Activity {
     private boolean uploadDialogSuppressed;
     private boolean shareProgressReceiverRegistered;
     private boolean networkCallbackRegistered;
-    private final ConnectivityManager.NetworkCallback networkCallback=new ConnectivityManager.NetworkCallback(){@Override public void onAvailable(Network network){mainHandler.post(()->{drainOutbox();resumePendingUploads();});}};
+    private final ConnectivityManager.NetworkCallback networkCallback=new ConnectivityManager.NetworkCallback(){@Override public void onAvailable(Network network){mainHandler.post(()->{if(isVpnNetwork(network))activeNetwork=null;drainOutbox();resumePendingUploads();});}};
     private final BroadcastReceiver shareProgressReceiver=new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){
         String message=intent.getStringExtra("message");if(message==null)return;
         String name=intent.getStringExtra("name"),uploadId=intent.getStringExtra("uploadId"),savedName=intent.getStringExtra("savedName");
@@ -234,6 +234,7 @@ public class MainActivity extends Activity {
         if (value.startsWith("1.0.63\n")) value="1.0.64\n• 有浏览器设备时，各内容区顶部显示设备状态窄条\n• 设备列表用图标直接重命名、关闭锁定或解除锁定\n• IP 地址标明相对于 NAS 的局域网或外网类型\n• 超过 30 天未活动且已离线的浏览器设备自动清理\n\n"+value;
         if (value.startsWith("1.0.64\n")) value="1.0.65\n• 设备列表改为从底部滑入的全窗口页面\n• 设备窄条只显示在文字、文件和链接区\n• 系统分享上传与主界面任务卡统一实时进度\n• 修复文件已上传但任务仍停留在等待处理的问题\n• 后台重试不再与正在执行的分享上传争抢任务\n\n"+value;
         if (value.startsWith("1.0.65\n")) value="1.0.66\n• 离线同步、后台重试和文件上传统一使用同一引擎\n• 前台、系统分享与后台任务共用进度和完成状态\n• 修复并发接手上传时可能停留在等待处理的问题\n• 服务端内容身份、收藏、revision 和时间元数据集中管理\n• 文件上传与 URL 下载支持事务恢复和跨重启幂等\n• 设备中心仅显示可靠地址，并清理旧诊断与无用权限\n\n"+value;
+        if (value.startsWith("1.0.66\n")) value="1.0.67\n• 修复开启 VPN 时主界面同步可能错误绑定底层 Wi-Fi 的问题\n• VPN 生效时同步、实时更新和传输统一遵循系统默认网络\n• Snippet 查看正文支持长按选中和局部复制，仍保持只读\n\n"+value;
         TextView v = new TextView(this); v.setText(value); v.setTextSize(sp); v.setTextColor(color); v.setPadding(dp(12),dp(10),dp(12),dp(10)); return v;
     }
     private GradientDrawable rounded(int color,int radius) { GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d; }
@@ -306,6 +307,13 @@ public class MainActivity extends Activity {
 
     private Network findNetwork(boolean wifiOnly) {
         ConnectivityManager cm=getSystemService(ConnectivityManager.class);
+        Network active=cm.getActiveNetwork();
+        NetworkCapabilities activeCapabilities=active==null?null:cm.getNetworkCapabilities(active);
+        // A VPN is the system-selected route. Binding its underlying Wi-Fi directly can be
+        // rejected with EPERM on some OEM builds and would unexpectedly bypass the VPN.
+        if(activeCapabilities!=null&&activeCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return null;
+        if(activeCapabilities!=null&&activeCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                &&(!wifiOnly||activeCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)))return active;
         Network fallback=null;
         for(Network n:cm.getAllNetworks()) {
             NetworkCapabilities c=cm.getNetworkCapabilities(n); if(c==null || c.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue;
@@ -315,7 +323,16 @@ public class MainActivity extends Activity {
         return fallback;
     }
 
+    private boolean isVpnNetwork(Network network){
+        if(network==null)return false;
+        NetworkCapabilities capabilities=getSystemService(ConnectivityManager.class).getNetworkCapabilities(network);
+        return capabilities!=null&&capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+    }
+
     private HttpURLConnection connection(Network n,String url,int timeout) throws IOException {
+        ConnectivityManager cm=getSystemService(ConnectivityManager.class);
+        Network current=cm.getActiveNetwork();
+        if(isVpnNetwork(current))n=null;
         URL u=new URL(url); HttpURLConnection c=(HttpURLConnection)(n!=null?n.openConnection(u):u.openConnection());
         c.setConnectTimeout(timeout); c.setReadTimeout(Math.max(timeout,8000)); c.setUseCaches(false); c.setRequestProperty("Accept","application/json"); return c;
     }
@@ -450,7 +467,11 @@ public class MainActivity extends Activity {
     private void loadThumbnail(Item item,ImageView view){thumbnailIo.execute(()->{try{HttpURLConnection c=connection(activeNetwork,activeBase+"/thumbnail/"+path(item.id),7000);try(InputStream in=c.getInputStream()){Bitmap b=BitmapFactory.decodeStream(in);if(b!=null){thumbnailCache.put(item.id,b);runOnUiThread(()->{if(item.id.equals(view.getTag()))view.setImageBitmap(b);});}}}catch(Exception ignored){}});}
 
     private void openItem(Item i) {
-        if(i.type.equals("text")) new AlertDialog.Builder(this).setTitle(i.filename).setMessage(i.content).setPositiveButton("复制",(d,w)->copy(i.content)).setNeutralButton("编辑",(d,w)->editText(i)).setNegativeButton("关闭",null).show();
+        if(i.type.equals("text")) {
+            AlertDialog dialog=new AlertDialog.Builder(this).setTitle(i.filename).setMessage(i.content).setPositiveButton("复制",(d,w)->copy(i.content)).setNeutralButton("编辑",(d,w)->editText(i)).setNegativeButton("关闭",null).create();
+            dialog.setOnShowListener(ignored->{TextView message=dialog.findViewById(android.R.id.message);if(message!=null){message.setTextIsSelectable(true);message.setLongClickable(true);}});
+            dialog.show();
+        }
         else if(i.type.equals("link")) { try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(i.content)));}catch(Exception e){toast("无法打开链接");} }
         else download(i,true);
     }
