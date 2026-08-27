@@ -1,4 +1,11 @@
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
 # 内容中转 Android App 版本记录
+
+## 1.0.67
+
+- 修复开启 VPN 时主界面可能强行绑定底层 Wi-Fi、显示 `Binding socket ... EPERM`，但分享上传仍成功的问题。
+- VPN 生效时主界面同步、实时更新和后台传输统一遵循 Android 系统默认网络，不再绕过 VPN。
+- Snippet“查看”对话框正文支持长按选中和局部复制，同时保持只读；原有整段复制、编辑和关闭按钮不变。
 
 ## 1.0.66
 
