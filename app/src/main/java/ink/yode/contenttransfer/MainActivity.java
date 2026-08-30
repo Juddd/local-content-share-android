@@ -53,7 +53,7 @@ public class MainActivity extends Activity {
     private final Runnable outboxRetry = this::drainOutbox;
     private SharedPreferences prefs;
     private LinearLayout root, toolbar, uploadPanel, uploadTasks;
-    private TextView status;
+    private TextView status, sortButton, addButton;
     private ListView list;
     private ItemAdapter adapter;
     private String section = "text", activeBase = "";
@@ -187,6 +187,31 @@ public class MainActivity extends Activity {
         @Override public int getOpacity(){return PixelFormat.TRANSLUCENT;}
     }
 
+    private class TabUnderlineDrawable extends Drawable {
+        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);private final boolean selected;
+        TabUnderlineDrawable(boolean selected){this.selected=selected;}
+        @Override public void draw(Canvas canvas){
+            int bottom=getBounds().bottom;
+            paint.setColor(Color.rgb(224,218,227));canvas.drawRect(getBounds().left,bottom-dp(1),getBounds().right,bottom,paint);
+            if(selected){paint.setColor(Color.rgb(103,80,164));canvas.drawRect(getBounds().left,bottom-dp(3),getBounds().right,bottom,paint);}
+        }
+        @Override public void setAlpha(int alpha){paint.setAlpha(alpha);invalidateSelf();}
+        @Override public void setColorFilter(android.graphics.ColorFilter filter){paint.setColorFilter(filter);invalidateSelf();}
+        @Override public int getOpacity(){return PixelFormat.TRANSLUCENT;}
+    }
+
+    private class SectionSwipeLayout extends SwipeRefreshLayout {
+        private float downX,downY;private long downAt;private boolean tracking;
+        SectionSwipeLayout(Context context){super(context);}
+        @Override public boolean dispatchTouchEvent(MotionEvent event){
+            int action=event.getActionMasked();int direction=0;
+            if(action==MotionEvent.ACTION_DOWN){downX=event.getX();downY=event.getY();downAt=SystemClock.uptimeMillis();tracking=true;}
+            else if(action==MotionEvent.ACTION_UP&&tracking){float dx=event.getX()-downX,dy=event.getY()-downY;long elapsed=SystemClock.uptimeMillis()-downAt;if(Math.abs(dx)>=dp(64)&&Math.abs(dx)>Math.abs(dy)*1.25f&&elapsed<=750)direction=dx<0?1:-1;tracking=false;}
+            else if(action==MotionEvent.ACTION_CANCEL)tracking=false;
+            boolean handled=super.dispatchTouchEvent(event);int move=direction;if(move!=0)post(()->moveSection(move));return handled;
+        }
+    }
+
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},4201);
@@ -235,6 +260,7 @@ public class MainActivity extends Activity {
         if (value.startsWith("1.0.64\n")) value="1.0.65\n• 设备列表改为从底部滑入的全窗口页面\n• 设备窄条只显示在文字、文件和链接区\n• 系统分享上传与主界面任务卡统一实时进度\n• 修复文件已上传但任务仍停留在等待处理的问题\n• 后台重试不再与正在执行的分享上传争抢任务\n\n"+value;
         if (value.startsWith("1.0.65\n")) value="1.0.66\n• 离线同步、后台重试和文件上传统一使用同一引擎\n• 前台、系统分享与后台任务共用进度和完成状态\n• 修复并发接手上传时可能停留在等待处理的问题\n• 服务端内容身份、收藏、revision 和时间元数据集中管理\n• 文件上传与 URL 下载支持事务恢复和跨重启幂等\n• 设备中心仅显示可靠地址，并清理旧诊断与无用权限\n\n"+value;
         if (value.startsWith("1.0.66\n")) value="1.0.67\n• 修复开启 VPN 时主界面同步可能错误绑定底层 Wi-Fi 的问题\n• VPN 生效时同步、实时更新和传输统一遵循系统默认网络\n• Snippet 查看正文支持长按选中和局部复制，仍保持只读\n\n"+value;
+        if (value.startsWith("1.0.67\n")) value="1.0.68\n• 四个内容区改为扁平等宽标签，选中项使用紫色底部指示线\n• 支持左右滑动依次切换四个内容区，到达两端后停止，不循环\n• 新增改为标题栏中的紫色圆形加号，排序改为相邻小图标\n• 新增、排序、设置和刷新统一放在同一行且尺寸一致\n• 记事本区自动灰显不适用的新增与排序操作\n\n"+value;
         TextView v = new TextView(this); v.setText(value); v.setTextSize(sp); v.setTextColor(color); v.setPadding(dp(12),dp(10),dp(12),dp(10)); return v;
     }
     private GradientDrawable rounded(int color,int radius) { GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d; }
@@ -264,15 +290,14 @@ public class MainActivity extends Activity {
         root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(12),dp(10),dp(12),0); root.setBackgroundColor(Color.rgb(250,247,252));
         root.setOnApplyWindowInsetsListener((view,insets)->{int top=Build.VERSION.SDK_INT>=30?insets.getInsets(WindowInsets.Type.statusBars()).top:insets.getSystemWindowInsetTop();view.setPadding(dp(12),top+dp(10),dp(12),0);return insets;});
         LinearLayout title = new LinearLayout(this); title.setGravity(Gravity.CENTER_VERTICAL);title.setPadding(dp(4),0,dp(4),dp(4));
-        TextView heading=text("内容中转",23,Color.rgb(45,39,49)); heading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);heading.setPadding(dp(4),dp(6),dp(8),dp(6)); title.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
-        TextView settings=iconButton("⚙","设置"); settings.setOnClickListener(v->showSettings());LinearLayout.LayoutParams iconParams=new LinearLayout.LayoutParams(dp(44),dp(44));iconParams.setMarginStart(dp(8));title.addView(settings,iconParams);
-        TextView refresh=iconButton("↻","刷新"); refresh.setOnClickListener(v->refresh());LinearLayout.LayoutParams refreshParams=new LinearLayout.LayoutParams(dp(44),dp(44));refreshParams.setMarginStart(dp(8));title.addView(refresh,refreshParams); root.addView(title);
+        TextView heading=text("内容中转",22,Color.rgb(45,39,49)); heading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);heading.setPadding(dp(4),dp(6),dp(4),dp(6)); title.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
+        addButton=text("＋",24,Color.WHITE);addButton.setGravity(Gravity.CENTER);addButton.setTypeface(Typeface.DEFAULT,Typeface.BOLD);addButton.setContentDescription("新增");addButton.setPadding(0,0,0,dp(1));addButton.setBackground(rounded(Color.rgb(103,80,164),21));addButton.setOnClickListener(v->addCurrent());LinearLayout.LayoutParams addParams=new LinearLayout.LayoutParams(dp(42),dp(42));addParams.setMarginStart(dp(6));title.addView(addButton,addParams);
+        sortButton=iconButton("⇅","排序");sortButton.setTextSize(19);sortButton.setOnClickListener(v->showSort());LinearLayout.LayoutParams sortParams=new LinearLayout.LayoutParams(dp(42),dp(42));sortParams.setMarginStart(dp(6));title.addView(sortButton,sortParams);
+        TextView settings=iconButton("⚙","设置"); settings.setOnClickListener(v->showSettings());LinearLayout.LayoutParams iconParams=new LinearLayout.LayoutParams(dp(42),dp(42));iconParams.setMarginStart(dp(6));title.addView(settings,iconParams);
+        TextView refresh=iconButton("↻","刷新"); refresh.setOnClickListener(v->refresh());LinearLayout.LayoutParams refreshParams=new LinearLayout.LayoutParams(dp(42),dp(42));refreshParams.setMarginStart(dp(6));title.addView(refresh,refreshParams); root.addView(title);
         status=text("正在连接…",12,Color.rgb(96,87,101)); status.setPadding(dp(8),0,dp(8),dp(10)); root.addView(status);
-        toolbar=new LinearLayout(this); toolbar.setGravity(Gravity.CENTER); toolbar.setWeightSum(4);toolbar.setPadding(0,dp(2),0,dp(8));
+        toolbar=new LinearLayout(this); toolbar.setGravity(Gravity.CENTER); toolbar.setWeightSum(4);toolbar.setPadding(0,0,0,dp(8));
         addTab("文字","text"); addTab("文件","file"); addTab("链接","link"); addTab("记事本","notepad"); root.addView(toolbar);
-        LinearLayout actions=new LinearLayout(this); actions.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);actions.setPadding(0,0,dp(2),dp(8));
-        TextView sort=actionChip("⇅  排序",false); sort.setOnClickListener(v->showSort()); actions.addView(sort);
-        TextView add=actionChip("＋  新增",true); add.setOnClickListener(v->addCurrent());LinearLayout.LayoutParams addParams=new LinearLayout.LayoutParams(-2,-2);addParams.setMarginStart(dp(8));actions.addView(add,addParams); root.addView(actions);
         uploadPanel=new LinearLayout(this);uploadPanel.setOrientation(LinearLayout.VERTICAL);uploadPanel.setPadding(dp(10),dp(8),dp(10),dp(4));uploadPanel.setBackground(rounded(Color.rgb(229,218,240),16));uploadPanel.setVisibility(View.GONE);
         TextView uploadHeading=text("上传任务",15,Color.rgb(62,43,78));uploadHeading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);uploadHeading.setPadding(dp(2),0,dp(2),dp(6));uploadPanel.addView(uploadHeading);
         uploadTasks=new LinearLayout(this);uploadTasks.setOrientation(LinearLayout.VERTICAL);uploadPanel.addView(uploadTasks,new LinearLayout.LayoutParams(-1,-2));
@@ -280,7 +305,7 @@ public class MainActivity extends Activity {
         deviceStrip=text("",13,Color.rgb(73,62,80));deviceStrip.setGravity(Gravity.CENTER_VERTICAL);deviceStrip.setPadding(dp(12),0,dp(12),0);deviceStrip.setBackground(rounded(Color.rgb(239,234,242),8));deviceStrip.setVisibility(View.GONE);deviceStrip.setOnClickListener(v->showDeviceCenter());
         LinearLayout.LayoutParams deviceStripParams=new LinearLayout.LayoutParams(-1,dp(38));deviceStripParams.setMargins(0,0,0,dp(7));root.addView(deviceStrip,deviceStripParams);
         list=new ListView(this); adapter=new ItemAdapter(); list.setAdapter(adapter); root.addView(list,new LinearLayout.LayoutParams(-1,0,1));
-        swipeRefresh = new SwipeRefreshLayout(this);
+        swipeRefresh = new SectionSwipeLayout(this);
         swipeRefresh.setColorSchemeColors(Color.rgb(103,80,164));
         swipeRefresh.setProgressBackgroundColorSchemeColor(Color.WHITE);
         swipeRefresh.setOnRefreshListener(this::refresh);
@@ -290,10 +315,27 @@ public class MainActivity extends Activity {
     }
 
     private void addTab(String label,String key) {
-        TextView b=actionChip(label,false);b.setTextSize(14);b.setOnClickListener(v->{section=key;updateTabs();renderSection();});LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(44),1);p.setMargins(dp(3),0,dp(3),0);toolbar.addView(b,p);tabViews.put(key,b);if(key.equals(section))updateTabs();
+        TextView b=text(label,15,Color.rgb(105,96,109));b.setGravity(Gravity.CENTER);b.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);b.setPadding(0,0,0,dp(2));b.setBackground(new TabUnderlineDrawable(false));b.setOnClickListener(v->{section=key;updateTabs();renderSection();});LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(45),1);toolbar.addView(b,p);tabViews.put(key,b);if(key.equals(section))updateTabs();
     }
 
-    private void updateTabs(){for(Map.Entry<String,TextView> e:tabViews.entrySet()){boolean selected=e.getKey().equals(section);e.getValue().setTextColor(selected?Color.WHITE:Color.rgb(73,62,80));e.getValue().setBackground(rounded(selected?Color.rgb(103,80,164):Color.rgb(239,234,242),20));}}
+    private void updateTabs(){
+        for(Map.Entry<String,TextView> e:tabViews.entrySet()){
+            boolean selected=e.getKey().equals(section);TextView tab=e.getValue();
+            tab.setTextColor(selected?Color.rgb(103,80,164):Color.rgb(105,96,109));
+            tab.setTypeface(Typeface.DEFAULT,selected?Typeface.BOLD:Typeface.NORMAL);
+            tab.setBackground(new TabUnderlineDrawable(selected));
+        }
+        boolean contentActions=!section.equals("notepad");
+        if(addButton!=null){addButton.setEnabled(contentActions);addButton.setAlpha(contentActions?1f:.32f);}
+        if(sortButton!=null){sortButton.setEnabled(contentActions);sortButton.setAlpha(contentActions?1f:.32f);}
+    }
+
+    private void moveSection(int direction){
+        String[] sections={"text","file","link","notepad"};int current=Arrays.asList(sections).indexOf(section),next=current+direction;
+        if(current<0||next<0||next>=sections.length)return;
+        section=sections[next];updateTabs();renderSection();
+        mainHandler.post(()->{View content=section.equals("notepad")?(notepadReading&&notepadPreviewScroll!=null?notepadPreviewScroll:notepad):list;if(content==null)return;content.animate().cancel();content.setAlpha(.68f);content.setTranslationX(direction*dp(42));content.animate().alpha(1f).translationX(0).setDuration(180).start();});
+    }
 
     private void setStatus(String s) { runOnUiThread(()->status.setText(s)); }
 

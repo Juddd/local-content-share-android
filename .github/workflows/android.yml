@@ -33,16 +33,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=v1.0.67
-          apk=content-transfer-v1.0.67.apk
+          tag=v1.0.68
+          apk=content-transfer-v1.0.68.apk
           curl --fail --location --retry 6 --retry-all-errors --retry-delay 5 -o "$apk" \
             "http://nas.yode.ink:8084/download/files/$apk"
-          echo "d34a620fbbf3bf8475d928440195b689d29c381e2d22c7fa8832a99e9d530f5c  $apk" | sha256sum --check
+          echo "03b56c504d479f9a1720755d08fd67d4f03997246cdc3fa91f3a6d5081e31aeb  $apk" | sha256sum --check
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$apk" --clobber
           else
             gh release create "$tag" "$apk" \
               --target "$GITHUB_SHA" \
-              --title "内容中转 Android 1.0.67" \
-              --notes "修复开启 VPN 时主界面同步强行绑定底层 Wi-Fi、出现 Binding socket EPERM 的问题；VPN 生效时同步、实时更新与传输统一遵循 Android 系统默认网络；Snippet 查看正文支持长按选中和局部复制，同时保持只读。使用原生产证书签名，可覆盖升级。"
+              --title "内容中转 Android 1.0.68" \
+              --notes "四个内容区改为扁平等宽标签，支持左右滑动依次切换且不循环；新增改为标题栏紫色圆形加号，并与排序、设置和刷新统一尺寸排列在同一行；记事本区自动灰显不适用操作。使用原生产证书签名，可覆盖升级。"
           fi
