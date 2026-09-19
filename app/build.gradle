@@ -1,3 +1,4 @@
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
 plugins { id 'com.android.application' }
 
 android {
@@ -8,8 +9,8 @@ android {
         applicationId 'ink.yode.contenttransfer'
         minSdk 26
         targetSdk 36
-        versionCode 70
-        versionName '1.0.69'
+        versionCode 71
+        versionName '1.0.70'
     }
 
     signingConfigs {

@@ -1,3 +1,4 @@
+warning: /bin/sh: setlocale: LC_ALL: cannot change locale (C.UTF-8)
 name: Android Build and Release
 
 on:
@@ -33,16 +34,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=v1.0.69
-          apk=content-transfer-v1.0.69.apk
+          tag=v1.0.70
+          apk=content-transfer-v1.0.70.apk
           curl --fail --location --retry 6 --retry-all-errors --retry-delay 5 -o "$apk" \
             "http://nas.yode.ink:8084/download/files/$apk"
-          echo "d6e55af751a29850ca6b9ac0bb392faa1b2cfaf4ad8f2d5f0978a9cb9201e00f  $apk" | sha256sum --check
+          echo "beca0024104584cea99f63393f2e968f13649e2349b2f91f1551fdd174eff375  $apk" | sha256sum --check
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$apk" --clobber
           else
             gh release create "$tag" "$apk" \
               --target "$GITHUB_SHA" \
-              --title "内容中转 Android 1.0.69" \
-              --notes "文字区新增紧凑搜索入口，实时匹配标题和完整正文；搜索基于本地数据，离线可用；收藏排序、实时同步和局部变更会自动重新应用搜索条件。使用原生产证书签名，可覆盖升级。"
+              --title "内容中转 Android 1.0.70" \
+              --notes "文字区悬浮搜索按钮支持手指拖动并永久记住位置；只有单击才打开搜索，拖动松手不会误触；按钮始终限制在内容区内。使用原生产证书签名，可覆盖升级。"
           fi
