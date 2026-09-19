@@ -54,6 +54,12 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private LinearLayout root, toolbar, uploadPanel, uploadTasks;
     private TextView status, sortButton, addButton;
+    private ImageView searchButton;
+    private LinearLayout snippetSearchBar;
+    private EditText snippetSearchInput;
+    private TextView snippetSearchEmpty;
+    private FrameLayout listHost;
+    private String snippetSearchQuery = "";
     private ListView list;
     private ItemAdapter adapter;
     private String section = "text", activeBase = "";
@@ -260,6 +266,7 @@ public class MainActivity extends Activity {
         if (value.startsWith("1.0.64\n")) value="1.0.65\n• 设备列表改为从底部滑入的全窗口页面\n• 设备窄条只显示在文字、文件和链接区\n• 系统分享上传与主界面任务卡统一实时进度\n• 修复文件已上传但任务仍停留在等待处理的问题\n• 后台重试不再与正在执行的分享上传争抢任务\n\n"+value;
         if (value.startsWith("1.0.65\n")) value="1.0.66\n• 离线同步、后台重试和文件上传统一使用同一引擎\n• 前台、系统分享与后台任务共用进度和完成状态\n• 修复并发接手上传时可能停留在等待处理的问题\n• 服务端内容身份、收藏、revision 和时间元数据集中管理\n• 文件上传与 URL 下载支持事务恢复和跨重启幂等\n• 设备中心仅显示可靠地址，并清理旧诊断与无用权限\n\n"+value;
         if (value.startsWith("1.0.66\n")) value="1.0.67\n• 修复开启 VPN 时主界面同步可能错误绑定底层 Wi-Fi 的问题\n• VPN 生效时同步、实时更新和传输统一遵循系统默认网络\n• Snippet 查看正文支持长按选中和局部复制，仍保持只读\n\n"+value;
+        if (value.startsWith("1.0.68\n")) value="1.0.69\n• 文字区新增紧凑的悬浮搜索入口，实时匹配标题和完整正文\n• 搜索基于本地数据，离线时也可使用；清空或关闭后恢复全部卡片\n• 收藏排序、实时同步、新增、修改和删除会自动重新应用当前搜索条件\n\n"+value;
         if (value.startsWith("1.0.67\n")) value="1.0.68\n• 四个内容区改为扁平等宽标签，选中项使用紫色底部指示线\n• 支持左右滑动依次切换四个内容区，到达两端后停止，不循环\n• 新增改为标题栏中的紫色圆形加号，排序改为相邻小图标\n• 新增、排序、设置和刷新统一放在同一行且尺寸一致\n• 记事本区自动灰显不适用的新增与排序操作\n\n"+value;
         TextView v = new TextView(this); v.setText(value); v.setTextSize(sp); v.setTextColor(color); v.setPadding(dp(12),dp(10),dp(12),dp(10)); return v;
     }
@@ -304,7 +311,15 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams uploadPanelParams=new LinearLayout.LayoutParams(-1,-2);uploadPanelParams.setMargins(0,0,0,dp(8));root.addView(uploadPanel,uploadPanelParams);
         deviceStrip=text("",13,Color.rgb(73,62,80));deviceStrip.setGravity(Gravity.CENTER_VERTICAL);deviceStrip.setPadding(dp(12),0,dp(12),0);deviceStrip.setBackground(rounded(Color.rgb(239,234,242),8));deviceStrip.setVisibility(View.GONE);deviceStrip.setOnClickListener(v->showDeviceCenter());
         LinearLayout.LayoutParams deviceStripParams=new LinearLayout.LayoutParams(-1,dp(38));deviceStripParams.setMargins(0,0,0,dp(7));root.addView(deviceStrip,deviceStripParams);
-        list=new ListView(this); adapter=new ItemAdapter(); list.setAdapter(adapter); root.addView(list,new LinearLayout.LayoutParams(-1,0,1));
+        snippetSearchBar=new LinearLayout(this);snippetSearchBar.setGravity(Gravity.CENTER_VERTICAL);snippetSearchBar.setPadding(dp(10),0,dp(6),0);snippetSearchBar.setBackground(rounded(Color.WHITE,16));snippetSearchBar.setVisibility(View.GONE);
+        TextView searchGlyph=text("⌕",18,Color.rgb(105,96,109));snippetSearchBar.addView(searchGlyph,new LinearLayout.LayoutParams(dp(28),dp(42)));
+        snippetSearchInput=input("搜索文字标题和正文",false);snippetSearchInput.setSingleLine(true);snippetSearchInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);snippetSearchInput.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int before,int count){snippetSearchQuery=s.toString();renderSection();}public void afterTextChanged(Editable e){}});snippetSearchBar.addView(snippetSearchInput,new LinearLayout.LayoutParams(0,dp(42),1));
+        TextView clearSearch=iconButton("⌫","清空搜索");clearSearch.setTextSize(18);clearSearch.setOnClickListener(v->{snippetSearchInput.setText("");snippetSearchInput.requestFocus();});snippetSearchBar.addView(clearSearch,new LinearLayout.LayoutParams(dp(38),dp(38)));
+        TextView closeSearch=iconButton("×","关闭搜索");closeSearch.setTextSize(19);closeSearch.setOnClickListener(v->toggleSnippetSearch(false));LinearLayout.LayoutParams closeSearchParams=new LinearLayout.LayoutParams(dp(38),dp(38));closeSearchParams.setMarginStart(dp(2));snippetSearchBar.addView(closeSearch,closeSearchParams);
+        LinearLayout.LayoutParams snippetSearchParams=new LinearLayout.LayoutParams(-1,dp(46));snippetSearchParams.setMargins(0,0,0,dp(7));root.addView(snippetSearchBar,snippetSearchParams);
+        snippetSearchEmpty=text("没有找到匹配的文字",14,Color.rgb(105,96,109));snippetSearchEmpty.setGravity(Gravity.CENTER);snippetSearchEmpty.setVisibility(View.GONE);root.addView(snippetSearchEmpty,new LinearLayout.LayoutParams(-1,dp(72)));
+        listHost=new FrameLayout(this);list=new ListView(this);adapter=new ItemAdapter();list.setAdapter(adapter);listHost.addView(list,new FrameLayout.LayoutParams(-1,-1));
+        searchButton=new ImageView(this);searchButton.setImageResource(R.drawable.ic_action_search);searchButton.setImageTintList(android.content.res.ColorStateList.valueOf(Color.rgb(75,151,174)));searchButton.setScaleType(ImageView.ScaleType.CENTER);searchButton.setPadding(dp(12),dp(12),dp(12),dp(12));searchButton.setBackground(rounded(Color.rgb(244,240,246),23));searchButton.setContentDescription("搜索文字");searchButton.setElevation(dp(5));searchButton.setOnClickListener(v->toggleSnippetSearch(true));FrameLayout.LayoutParams floatingSearchParams=new FrameLayout.LayoutParams(dp(46),dp(46),Gravity.BOTTOM|Gravity.END);floatingSearchParams.setMargins(0,0,dp(8),dp(12));listHost.addView(searchButton,floatingSearchParams);root.addView(listHost,new LinearLayout.LayoutParams(-1,0,1));
         swipeRefresh = new SectionSwipeLayout(this);
         swipeRefresh.setColorSchemeColors(Color.rgb(103,80,164));
         swipeRefresh.setProgressBackgroundColorSchemeColor(Color.WHITE);
@@ -328,6 +343,16 @@ public class MainActivity extends Activity {
         boolean contentActions=!section.equals("notepad");
         if(addButton!=null){addButton.setEnabled(contentActions);addButton.setAlpha(contentActions?1f:.32f);}
         if(sortButton!=null){sortButton.setEnabled(contentActions);sortButton.setAlpha(contentActions?1f:.32f);}
+        boolean textSection=section.equals("text");
+        if(searchButton!=null){boolean searchOpen=snippetSearchBar!=null&&snippetSearchBar.getVisibility()==View.VISIBLE;searchButton.setVisibility(textSection&&!searchOpen?View.VISIBLE:View.GONE);}
+        if(snippetSearchBar!=null){if(!textSection){snippetSearchQuery="";if(snippetSearchInput!=null)snippetSearchInput.setText("");snippetSearchBar.setVisibility(View.GONE);}else if(snippetSearchBar.getVisibility()!=View.VISIBLE){snippetSearchBar.setVisibility(View.GONE);}}
+        if(snippetSearchEmpty!=null&&!textSection)snippetSearchEmpty.setVisibility(View.GONE);
+    }
+
+    private void toggleSnippetSearch(boolean open){
+        if(!section.equals("text")||snippetSearchBar==null)return;
+        if(open){snippetSearchBar.setVisibility(View.VISIBLE);searchButton.setVisibility(View.GONE);snippetSearchInput.requestFocus();((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(snippetSearchInput,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);}
+        else{snippetSearchQuery="";snippetSearchInput.setText("");snippetSearchBar.setVisibility(View.GONE);searchButton.setVisibility(View.VISIBLE);((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(snippetSearchInput.getWindowToken(),0);renderSection();}
     }
 
     private void moveSection(int direction){
@@ -456,9 +481,18 @@ public class MainActivity extends Activity {
 
     private void renderSection() {
         updateDeviceStrip();
-        if(section.equals("notepad")){ showNotepad(); return; }
+        if(section.equals("notepad")){if(listHost!=null)listHost.setVisibility(View.GONE);showNotepad();return;}
+        if(listHost!=null)listHost.setVisibility(View.VISIBLE);
         if(notepad!=null){root.removeView(notepad);notepad=null;if(notepadPreviewScroll!=null){root.removeView(notepadPreviewScroll);notepadPreviewScroll=null;notepadPreview=null;}if(notepadActions!=null){root.removeView(notepadActions);notepadActions=null;notepadRead=null;notepadSave=null;}if(list.getParent()==null)root.addView(list,new LinearLayout.LayoutParams(-1,0,1));}
-        visibleItems.clear(); for(Item i:allItems) if(i.type.equals(section)) visibleItems.add(i);
+        visibleItems.clear(); for(Item i:allItems) if(i.type.equals(section)) {
+            if(section.equals("text")&&!snippetSearchQuery.trim().isEmpty()){
+                String haystack=(i.filename+"\n"+i.content).toLowerCase(Locale.ROOT);boolean matches=true;
+                for(String term:snippetSearchQuery.toLowerCase(Locale.ROOT).trim().split("\\s+")){if(!term.isEmpty()&&!haystack.contains(term)){matches=false;break;}}
+                if(!matches)continue;
+            }
+            visibleItems.add(i);
+        }
+        if(snippetSearchEmpty!=null)snippetSearchEmpty.setVisibility(section.equals("text")&&!snippetSearchQuery.trim().isEmpty()&&visibleItems.isEmpty()?View.VISIBLE:View.GONE);
         String key=prefs.getString("sort_"+section,section.equals("file")?"created_desc":"created_desc");
         Comparator<Item> cmp;
         if(key.startsWith("title")) cmp=Comparator.comparing(a->a.filename,java.text.Collator.getInstance(Locale.CHINA));
@@ -631,7 +665,6 @@ public class MainActivity extends Activity {
 
     private void showNotepad(){
         if(notepad!=null)return;
-        if(list.getParent()!=null)root.removeView(list);
         notepad=input("记事本",true);
         notepadSavedText=prefs.getString("notepad","");
         updatingNotepad=true;notepad.setText(notepadSavedText);updatingNotepad=false;
