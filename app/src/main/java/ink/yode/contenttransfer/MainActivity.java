@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.graphics.RectF;
 import android.util.LruCache;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -48,6 +49,7 @@ public class MainActivity extends Activity {
     private final Map<String,Integer> downloadProgress = new ConcurrentHashMap<>();
     private final Set<String> deletingItems = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Set<String> favoritePending = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Set<String> privatePending = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final AtomicBoolean outboxDrainScheduled = new AtomicBoolean();
     private final AtomicBoolean outboxStatusPending = new AtomicBoolean();
     private final Runnable outboxRetry = this::drainOutbox;
@@ -56,12 +58,15 @@ public class MainActivity extends Activity {
     private TextView status, sortButton, addButton;
     private ImageView searchButton;
     private LinearLayout snippetSearchBar;
+    private LinearLayout snippetCategoryBar;
+    private TextView snippetNormalTab, snippetPrivateTab;
     private EditText snippetSearchInput;
     private TextView snippetSearchEmpty;
     private FrameLayout listHost;
     private static final String SEARCH_X_FRACTION = "snippet_search_x_fraction";
     private static final String SEARCH_Y_FRACTION = "snippet_search_y_fraction";
     private String snippetSearchQuery = "";
+    private String snippetCategory = "normal";
     private ListView list;
     private ItemAdapter adapter;
     private String section = "text", activeBase = "";
@@ -176,20 +181,20 @@ public class MainActivity extends Activity {
 
     static class Item {
         String id, storageId, type, filename, content, createdAt, modifiedAt, syncState="synced";
-        long size, revision; boolean favorite; JSONObject conflict;
+        long size, revision; boolean favorite, privateItem; JSONObject conflict;
         static Item from(JSONObject o) {
             Item i = new Item();
             i.id=o.optString("id"); i.storageId=o.optString("storageId"); i.type=o.optString("type"); i.filename=o.optString("filename");
-            i.content=o.optString("content"); i.createdAt=o.optString("createdAt"); i.modifiedAt=o.optString("modifiedAt"); i.size=o.optLong("size"); i.favorite=o.optBoolean("favorite");i.revision=o.optLong("revision");i.syncState=o.optString("syncState","synced");i.conflict=o.optJSONObject("conflict");
+            i.content=o.optString("content"); i.createdAt=o.optString("createdAt"); i.modifiedAt=o.optString("modifiedAt"); i.size=o.optLong("size"); i.favorite=o.optBoolean("favorite");i.privateItem=o.optBoolean("private");i.revision=o.optLong("revision");i.syncState=o.optString("syncState","synced");i.conflict=o.optJSONObject("conflict");
             return i;
         }
-        JSONObject json()throws JSONException {JSONObject o=new JSONObject();o.put("id",id).put("storageId",storageId).put("type",type).put("filename",filename).put("content",content).put("createdAt",createdAt).put("modifiedAt",modifiedAt).put("size",size).put("favorite",favorite).put("revision",revision).put("syncState",syncState);return o;}
+        JSONObject json()throws JSONException {JSONObject o=new JSONObject();o.put("id",id).put("storageId",storageId).put("type",type).put("filename",filename).put("content",content).put("createdAt",createdAt).put("modifiedAt",modifiedAt).put("size",size).put("favorite",favorite).put("private",privateItem).put("revision",revision).put("syncState",syncState);return o;}
     }
 
     private class FavoriteDrawable extends Drawable {
         private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);private final Item item;
         FavoriteDrawable(Item item){this.item=item;paint.setTextAlign(Paint.Align.CENTER);paint.setTypeface(Typeface.DEFAULT);paint.setTextSize(dp(18));}
-        @Override public void draw(Canvas canvas){String symbol=item.favorite?"★":"☆";paint.setColor(item.favorite?Color.rgb(245,183,0):Color.rgb(120,115,122));paint.setAlpha(favoritePending.contains(item.id)?115:255);Paint.FontMetrics fm=paint.getFontMetrics();float x=getBounds().right-dp(18),y=getBounds().bottom-dp(2)-fm.descent;canvas.drawText(symbol,x,y,paint);}
+        @Override public void draw(Canvas canvas){int alpha=(favoritePending.contains(item.id)||privatePending.contains(item.id))?115:255;float starX=getBounds().right-dp(18),lockX=getBounds().right-dp(42),bottom=getBounds().bottom;paint.setStyle(Paint.Style.FILL);paint.setColor(item.favorite?Color.rgb(245,183,0):Color.rgb(120,115,122));paint.setAlpha(alpha);Paint.FontMetrics fm=paint.getFontMetrics();canvas.drawText(item.favorite?"★":"☆",starX,bottom-dp(2)-fm.descent,paint);paint.setColor(item.privateItem?Color.rgb(75,151,174):Color.rgb(120,115,122));paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(1));canvas.drawRoundRect(new RectF(lockX-dp(6),bottom-dp(11),lockX+dp(6),bottom-dp(2)),dp(2),dp(2),paint);canvas.drawArc(new RectF(lockX-dp(4),bottom-dp(16),lockX+dp(4),bottom-dp(7)),180,180,false,paint);paint.setStyle(Paint.Style.FILL);}
         @Override public void setAlpha(int alpha){paint.setAlpha(alpha);invalidateSelf();}
         @Override public void setColorFilter(android.graphics.ColorFilter filter){paint.setColorFilter(filter);invalidateSelf();}
         @Override public int getOpacity(){return PixelFormat.TRANSLUCENT;}
@@ -224,6 +229,8 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},4201);
         prefs = getSharedPreferences("content-transfer", MODE_PRIVATE);
+        snippetCategory = prefs.getString("snippet_category", "normal");
+        if (!snippetCategory.equals("private")) snippetCategory = "normal";
         syncDb=new SyncDatabase(this);
         syncEngine=new SyncTransferEngine(this,syncDb,(url,timeout)->connection(findNetwork(false),url,timeout));
         activeBase=ServerConfig.get(this);
@@ -271,6 +278,8 @@ public class MainActivity extends Activity {
         if (value.startsWith("1.0.67\n")) value="1.0.68\n• 四个内容区改为扁平等宽标签，选中项使用紫色底部指示线\n• 支持左右滑动依次切换四个内容区，到达两端后停止，不循环\n• 新增改为标题栏中的紫色圆形加号，排序改为相邻小图标\n• 新增、排序、设置和刷新统一放在同一行且尺寸一致\n• 记事本区自动灰显不适用的新增与排序操作\n\n"+value;
         if (value.startsWith("1.0.68\n")) value="1.0.69\n• 文字区新增紧凑的悬浮搜索入口，实时匹配标题和完整正文\n• 搜索基于本地数据，离线时也可使用；清空或关闭后恢复全部卡片\n• 收藏排序、实时同步、新增、修改和删除会自动重新应用当前搜索条件\n\n"+value;
         if (value.startsWith("1.0.69\n")) value="1.0.70\n• 文字区悬浮搜索按钮支持手指拖动，并永久记住位置\n• 只有单击按钮才打开搜索，拖动后松手不会误触搜索\n• 拖动范围限制在内容区内，避免按钮移出屏幕\n\n"+value;
+        if (value.startsWith("1.0.70\n")) value="1.0.71\n• 链接区接受所有合法 URI 协议，包括 magnet、thunder、ed2k、mailto 和 ftp 等链接\n• 新建链接的输入提示与网页端统一，不再误导为只支持 http/https\n• 屏蔽 javascript、vbscript 和 data 协议，避免不安全链接进入网页打开入口\n\n"+value;
+        if (value.startsWith("1.0.71\n")) value="1.0.72\n• 文字区增加“普通”和“私”两个分类\n• 卡片右下角新增分类锁图标，可直接在两个分类之间切换\n• Android 与网页端同步分类状态，离线切换会自动排队重试\n\n"+value;
         TextView v = new TextView(this); v.setText(value); v.setTextSize(sp); v.setTextColor(color); v.setPadding(dp(12),dp(10),dp(12),dp(10)); return v;
     }
     private GradientDrawable rounded(int color,int radius) { GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d; }
@@ -320,6 +329,7 @@ public class MainActivity extends Activity {
         TextView clearSearch=iconButton("⌫","清空搜索");clearSearch.setTextSize(18);clearSearch.setOnClickListener(v->{snippetSearchInput.setText("");snippetSearchInput.requestFocus();});snippetSearchBar.addView(clearSearch,new LinearLayout.LayoutParams(dp(38),dp(38)));
         TextView closeSearch=iconButton("×","关闭搜索");closeSearch.setTextSize(19);closeSearch.setOnClickListener(v->toggleSnippetSearch(false));LinearLayout.LayoutParams closeSearchParams=new LinearLayout.LayoutParams(dp(38),dp(38));closeSearchParams.setMarginStart(dp(2));snippetSearchBar.addView(closeSearch,closeSearchParams);
         LinearLayout.LayoutParams snippetSearchParams=new LinearLayout.LayoutParams(-1,dp(46));snippetSearchParams.setMargins(0,0,0,dp(7));root.addView(snippetSearchBar,snippetSearchParams);
+        snippetCategoryBar=new LinearLayout(this);snippetCategoryBar.setGravity(Gravity.CENTER);snippetCategoryBar.setPadding(0,0,0,dp(5));snippetNormalTab=snippetCategoryButton("普通","normal");snippetPrivateTab=snippetCategoryButton("私","private");snippetCategoryBar.addView(snippetNormalTab,new LinearLayout.LayoutParams(0,dp(36),1));snippetCategoryBar.addView(snippetPrivateTab,new LinearLayout.LayoutParams(0,dp(36),1));root.addView(snippetCategoryBar,new LinearLayout.LayoutParams(-1,dp(41)));
         snippetSearchEmpty=text("没有找到匹配的文字",14,Color.rgb(105,96,109));snippetSearchEmpty.setGravity(Gravity.CENTER);snippetSearchEmpty.setVisibility(View.GONE);root.addView(snippetSearchEmpty,new LinearLayout.LayoutParams(-1,dp(72)));
         listHost=new FrameLayout(this);list=new ListView(this);adapter=new ItemAdapter();list.setAdapter(adapter);listHost.addView(list,new FrameLayout.LayoutParams(-1,-1));
         searchButton=new ImageView(this);searchButton.setImageResource(R.drawable.ic_action_search);searchButton.setImageTintList(android.content.res.ColorStateList.valueOf(Color.rgb(75,151,174)));searchButton.setScaleType(ImageView.ScaleType.CENTER);searchButton.setPadding(dp(12),dp(12),dp(12),dp(12));searchButton.setBackground(rounded(Color.rgb(244,240,246),23));searchButton.setContentDescription("搜索文字，可拖动调整位置");searchButton.setElevation(dp(5));searchButton.setOnClickListener(v->toggleSnippetSearch(true));configureSnippetSearchDrag();FrameLayout.LayoutParams floatingSearchParams=new FrameLayout.LayoutParams(dp(46),dp(46),Gravity.BOTTOM|Gravity.END);floatingSearchParams.setMargins(0,0,dp(8),dp(12));listHost.addView(searchButton,floatingSearchParams);root.addView(listHost,new LinearLayout.LayoutParams(-1,0,1));listHost.post(this::restoreSnippetSearchPosition);
@@ -336,6 +346,9 @@ public class MainActivity extends Activity {
         TextView b=text(label,15,Color.rgb(105,96,109));b.setGravity(Gravity.CENTER);b.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);b.setPadding(0,0,0,dp(2));b.setBackground(new TabUnderlineDrawable(false));b.setOnClickListener(v->{section=key;updateTabs();renderSection();});LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(45),1);toolbar.addView(b,p);tabViews.put(key,b);if(key.equals(section))updateTabs();
     }
 
+    private TextView snippetCategoryButton(String label,String key){TextView b=text(label,14,Color.rgb(105,96,109));b.setGravity(Gravity.CENTER);b.setOnClickListener(v->{snippetCategory=key;prefs.edit().putString("snippet_category",snippetCategory).apply();updateSnippetCategoryTabs();renderSection();});return b;}
+    private void updateSnippetCategoryTabs(){if(snippetNormalTab==null||snippetPrivateTab==null)return;boolean privateSelected=snippetCategory.equals("private");snippetNormalTab.setTextColor(privateSelected?Color.rgb(105,96,109):Color.rgb(103,80,164));snippetPrivateTab.setTextColor(privateSelected?Color.rgb(103,80,164):Color.rgb(105,96,109));snippetNormalTab.setTypeface(Typeface.DEFAULT,privateSelected?Typeface.NORMAL:Typeface.BOLD);snippetPrivateTab.setTypeface(Typeface.DEFAULT,privateSelected?Typeface.BOLD:Typeface.NORMAL);snippetNormalTab.setBackground(new TabUnderlineDrawable(!privateSelected));snippetPrivateTab.setBackground(new TabUnderlineDrawable(privateSelected));}
+
     private void updateTabs(){
         for(Map.Entry<String,TextView> e:tabViews.entrySet()){
             boolean selected=e.getKey().equals(section);TextView tab=e.getValue();
@@ -347,6 +360,7 @@ public class MainActivity extends Activity {
         if(addButton!=null){addButton.setEnabled(contentActions);addButton.setAlpha(contentActions?1f:.32f);}
         if(sortButton!=null){sortButton.setEnabled(contentActions);sortButton.setAlpha(contentActions?1f:.32f);}
         boolean textSection=section.equals("text");
+        if(snippetCategoryBar!=null){snippetCategoryBar.setVisibility(textSection?View.VISIBLE:View.GONE);if(textSection)updateSnippetCategoryTabs();}
         if(searchButton!=null){boolean searchOpen=snippetSearchBar!=null&&snippetSearchBar.getVisibility()==View.VISIBLE;searchButton.setVisibility(textSection&&!searchOpen?View.VISIBLE:View.GONE);if(textSection&&!searchOpen&&listHost!=null)listHost.post(this::restoreSnippetSearchPosition);}
         if(snippetSearchBar!=null){if(!textSection){snippetSearchQuery="";if(snippetSearchInput!=null)snippetSearchInput.setText("");snippetSearchBar.setVisibility(View.GONE);}else if(snippetSearchBar.getVisibility()!=View.VISIBLE){snippetSearchBar.setVisibility(View.GONE);}}
         if(snippetSearchEmpty!=null&&!textSection)snippetSearchEmpty.setVisibility(View.GONE);
@@ -513,6 +527,7 @@ public class MainActivity extends Activity {
         if(listHost!=null)listHost.setVisibility(View.VISIBLE);
         if(notepad!=null){root.removeView(notepad);notepad=null;if(notepadPreviewScroll!=null){root.removeView(notepadPreviewScroll);notepadPreviewScroll=null;notepadPreview=null;}if(notepadActions!=null){root.removeView(notepadActions);notepadActions=null;notepadRead=null;notepadSave=null;}if(list.getParent()==null)root.addView(list,new LinearLayout.LayoutParams(-1,0,1));}
         visibleItems.clear(); for(Item i:allItems) if(i.type.equals(section)) {
+            if(section.equals("text")&&i.privateItem!=snippetCategory.equals("private"))continue;
             if(section.equals("text")&&!snippetSearchQuery.trim().isEmpty()){
                 String haystack=(i.filename+"\n"+i.content).toLowerCase(Locale.ROOT);boolean matches=true;
                 for(String term:snippetSearchQuery.toLowerCase(Locale.ROOT).trim().split("\\s+")){if(!term.isEmpty()&&!haystack.contains(term)){matches=false;break;}}
@@ -520,7 +535,7 @@ public class MainActivity extends Activity {
             }
             visibleItems.add(i);
         }
-        if(snippetSearchEmpty!=null)snippetSearchEmpty.setVisibility(section.equals("text")&&!snippetSearchQuery.trim().isEmpty()&&visibleItems.isEmpty()?View.VISIBLE:View.GONE);
+        if(snippetSearchEmpty!=null){snippetSearchEmpty.setText(snippetSearchQuery.trim().isEmpty()?(snippetCategory.equals("private")?"暂无私卡片":"暂无普通卡片"):"没有找到匹配的文字");snippetSearchEmpty.setVisibility(section.equals("text")&&visibleItems.isEmpty()?View.VISIBLE:View.GONE);}
         String key=prefs.getString("sort_"+section,section.equals("file")?"created_desc":"created_desc");
         Comparator<Item> cmp;
         if(key.startsWith("title")) cmp=Comparator.comparing(a->a.filename,java.text.Collator.getInstance(Locale.CHINA));
@@ -557,13 +572,15 @@ public class MainActivity extends Activity {
             box.setOnClickListener(v->{if(i.syncState.equals(SyncDatabase.CONFLICT)){showConflict(i);return;}if(i.type.equals("file")){if(!prefs.getString("downloaded_"+i.id,"").isEmpty())openLocal(i);}else openItem(i);});box.setOnLongClickListener(v->{actions(i);return true;});
             if(!i.type.equals("text"))return box;
             box.setForeground(new FavoriteDrawable(i));
-            box.setOnTouchListener((v,event)->{boolean inStar=event.getX()>=v.getWidth()-dp(36)&&event.getY()>=v.getHeight()-dp(36);if(!inStar)return false;if(event.getAction()==MotionEvent.ACTION_UP&&!favoritePending.contains(i.id))toggleFavorite(i);return true;});
+            box.setOnTouchListener((v,event)->{boolean inFooter=event.getX()>=v.getWidth()-dp(66)&&event.getY()>=v.getHeight()-dp(36);if(!inFooter)return false;if(event.getAction()==MotionEvent.ACTION_UP){if(event.getX()<v.getWidth()-dp(32)){if(!privatePending.contains(i.id))togglePrivate(i);}else if(!favoritePending.contains(i.id))toggleFavorite(i);}return true;});
+            box.setContentDescription(i.privateItem?"私卡片："+i.filename:"普通卡片："+i.filename);
             box.setAccessibilityDelegate(new View.AccessibilityDelegate(){@Override public void onInitializeAccessibilityNodeInfo(View host,android.view.accessibility.AccessibilityNodeInfo info){super.onInitializeAccessibilityNodeInfo(host,info);info.addAction(new android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK,i.favorite?"取消收藏":"收藏"));}});
             return box;
         }
     }
 
     private void toggleFavorite(Item item){if(!favoritePending.add(item.id))return;item.favorite=!item.favorite;queueMutation(item,"favorite",map("favorite",String.valueOf(item.favorite)));favoritePending.remove(item.id);renderSection();}
+    private void togglePrivate(Item item){if(!privatePending.add(item.id))return;item.privateItem=!item.privateItem;queueMutation(item,"private",map("private",String.valueOf(item.privateItem)));privatePending.remove(item.id);renderSection();}
 
     private String preview(String s){int limit=prefs.getInt("preview",600);int[] cp=s.codePoints().toArray();return cp.length<=limit?s:new String(cp,0,limit)+"… 点击查看全文";}
     private String formatSize(long b){if(b<1024)return b+" B";if(b<1048576)return String.format(Locale.CHINA,"%.1f KB",b/1024d);if(b<1073741824)return String.format(Locale.CHINA,"%.1f MB",b/1048576d);return String.format(Locale.CHINA,"%.2f GB",b/1073741824d);}
@@ -602,7 +619,8 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle(existing==null?"新建文字":"编辑文字").setView(box).setPositiveButton("保存",(d,w)->{if(existing==null)postForm("/submit",map("name",name.getText().toString(),"content",body.getText().toString(),"expiry",expiryValues[expiry.getSelectedItemPosition()]));else{existing.content=body.getText().toString();existing.modifiedAt=isoNow();queueMutation(existing,"edit",map("content",existing.content));}}).setNegativeButton("取消",null).show();
     }
     private void editText(Item i){textForm(i);}
-    private void linkForm(){LinearLayout box=new LinearLayout(this);box.setPadding(dp(18),0,dp(18),0);box.setOrientation(LinearLayout.VERTICAL);EditText n=input("标题",false),u=input("https://example.com",false);box.addView(n);box.addView(u);new AlertDialog.Builder(this).setTitle("新建链接").setView(box).setPositiveButton("保存",(d,w)->postForm("/submit",map("type","link","name",n.getText().toString(),"content",u.getText().toString()))).setNegativeButton("取消",null).show();}
+    private boolean isValidLinkUri(String value){String result=value==null?"":value.trim();if(result.isEmpty())return false;for(int i=0;i<result.length();i++)if(Character.isWhitespace(result.charAt(i)))return false;Uri uri=Uri.parse(result);String scheme=uri.getScheme();if(scheme==null||!scheme.matches("[A-Za-z][A-Za-z0-9+.-]*"))return false;return !scheme.equalsIgnoreCase("javascript")&&!scheme.equalsIgnoreCase("vbscript")&&!scheme.equalsIgnoreCase("data");}
+    private void linkForm(){LinearLayout box=new LinearLayout(this);box.setPadding(dp(18),0,dp(18),0);box.setOrientation(LinearLayout.VERTICAL);EditText n=input("标题",false),u=input("magnet:?xt=...、thunder://... 或 https://...",false);u.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);box.addView(n);box.addView(u);new AlertDialog.Builder(this).setTitle("新建链接").setView(box).setPositiveButton("保存",(d,w)->{String link=u.getText().toString().trim();if(!isValidLinkUri(link)){u.setError("请输入带协议的链接，例如 magnet:? 或 thunder://");return;}postForm("/submit",map("type","link","name",n.getText().toString(),"content",link));}).setNegativeButton("取消",null).show();}
     private void fileUploadForm(){LinearLayout box=new LinearLayout(this);box.setPadding(dp(18),0,dp(18),0);box.setOrientation(LinearLayout.VERTICAL);Spinner expiry=new Spinner(this);String[] labels={"永不过期","1 小时","4 小时","1 天"};String[] values={"Never","1 hour","4 hours","1 day"};expiry.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,labels));box.addView(text("保存时间",14,Color.DKGRAY));box.addView(expiry);new AlertDialog.Builder(this).setTitle("添加文件").setView(box).setPositiveButton("选择文件",(d,w)->{pendingExpiry=values[expiry.getSelectedItemPosition()];Intent x=new Intent(Intent.ACTION_OPEN_DOCUMENT);x.setType("*/*");x.addCategory(Intent.CATEGORY_OPENABLE);x.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);startActivityForResult(x,PICK_FILE);}).setNeutralButton("从 URL 下载",(d,w)->urlDownloadForm(values[expiry.getSelectedItemPosition()])).setNegativeButton("取消",null).show();}
     private void urlDownloadForm(String expiry){LinearLayout box=new LinearLayout(this);box.setPadding(dp(18),0,dp(18),0);box.setOrientation(LinearLayout.VERTICAL);EditText u=input("https://example.com/file.zip",false),n=input("保存名称（可选）",false);box.addView(u);box.addView(n);new AlertDialog.Builder(this).setTitle("从 URL 下载").setView(box).setPositiveButton("下载",(d,w)->downloadURLToNAS(u.getText().toString(),n.getText().toString(),expiry)).setNegativeButton("取消",null).show();}
     private Map<String,String> map(String...x){Map<String,String>m=new LinkedHashMap<>();for(int i=0;i<x.length;i+=2)m.put(x[i],x[i+1]);return m;}
