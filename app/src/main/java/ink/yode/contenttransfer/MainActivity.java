@@ -283,6 +283,7 @@ public class MainActivity extends Activity {
         if (value.startsWith("1.0.72\n")) value="1.0.73\n• 普通/私分类的锁图标改为与设备中心一致，并与收藏星星垂直对齐\n• 普通卡片显示打开锁，私卡片显示蓝绿色关闭锁\n• 分类切换条改为紧凑灰色连续样式，当前分类使用白色背景，不再画紫色下划线\n• 搜索悬浮按钮可拖动到整个文字内容区域的底部\n\n"+value;
         if (value.startsWith("1.0.73\n")) value="1.0.74\n• 修复搜索悬浮按钮布局坐标与位移叠加导致底部无法拖动的问题\n• 普通/私分类条进一步压缩，并与设备状态条直接相连\n• 当前分类背景改为与内容区一致的浅色\n\n"+value;
         if (value.startsWith("1.0.74\n")) value="1.0.75\n• 修复首次进入文字区时普通分类背景未立即应用的问题\n• 设备状态条和普通/私分类条改为无倒角的连续灰色背景\n\n"+value;
+        if (value.startsWith("1.0.75\n")) value="1.0.76\n• 去掉普通/私当前选中背景的圆角，确保设备状态条、分类条和选中项完全连续融合\n\n"+value;
         TextView v = new TextView(this); v.setText(value); v.setTextSize(sp); v.setTextColor(color); v.setPadding(dp(12),dp(10),dp(12),dp(10)); return v;
     }
     private GradientDrawable rounded(int color,int radius) { GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d; }
@@ -350,7 +351,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView snippetCategoryButton(String label,String key){TextView b=text(label,12,Color.rgb(73,62,80));b.setGravity(Gravity.CENTER);b.setPadding(0,0,0,0);b.setOnClickListener(v->{snippetCategory=key;prefs.edit().putString("snippet_category",snippetCategory).apply();updateSnippetCategoryTabs();renderSection();});return b;}
-    private void updateSnippetCategoryTabs(){if(snippetNormalTab==null||snippetPrivateTab==null)return;boolean privateSelected=snippetCategory.equals("private");int textColor=Color.rgb(73,62,80),contentColor=Color.rgb(250,247,252);snippetNormalTab.setTextColor(textColor);snippetPrivateTab.setTextColor(textColor);snippetNormalTab.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);snippetPrivateTab.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);snippetNormalTab.setBackground(privateSelected?new ColorDrawable(Color.TRANSPARENT):rounded(contentColor,4));snippetPrivateTab.setBackground(privateSelected?rounded(contentColor,4):new ColorDrawable(Color.TRANSPARENT));}
+    private void updateSnippetCategoryTabs(){if(snippetNormalTab==null||snippetPrivateTab==null)return;boolean privateSelected=snippetCategory.equals("private");int textColor=Color.rgb(73,62,80),contentColor=Color.rgb(250,247,252);snippetNormalTab.setTextColor(textColor);snippetPrivateTab.setTextColor(textColor);snippetNormalTab.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);snippetPrivateTab.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);snippetNormalTab.setBackground(privateSelected?new ColorDrawable(Color.TRANSPARENT):new ColorDrawable(contentColor));snippetPrivateTab.setBackground(privateSelected?new ColorDrawable(contentColor):new ColorDrawable(Color.TRANSPARENT));}
 
     private void updateTabs(){
         for(Map.Entry<String,TextView> e:tabViews.entrySet()){

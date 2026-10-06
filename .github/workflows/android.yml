@@ -33,16 +33,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=v1.0.75
-          apk=content-transfer-v1.0.75.apk
+          tag=v1.0.76
+          apk=content-transfer-v1.0.76.apk
           curl --fail --location --retry 6 --retry-all-errors --retry-delay 5 -o "$apk" \
             "http://nas.yode.ink:8084/download/files/$apk"
-          echo "c175dc071401c0d6fdcccd6d5533fca0304d94932c8912f6df7fbff37a89f1bc  $apk" | sha256sum --check
+          echo "a8195dd4586e1436e358e7e2e371f37a924532dcb1fd4a9e8dadda6a1e2eae13  $apk" | sha256sum --check
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$apk" --clobber
           else
             gh release create "$tag" "$apk" \
               --target "$GITHUB_SHA" \
-              --title "内容中转 Android 1.0.75" \
-              --notes "修复首次进入文字区时普通分类背景未立即应用的问题；设备状态条和普通/私分类条改为无倒角的连续灰色背景。使用原生产证书签名，可覆盖升级。"
+              --title "内容中转 Android 1.0.76" \
+              --notes "去掉普通/私当前选中背景的圆角，确保设备状态条、分类条和选中项完全连续融合。使用原生产证书签名，可覆盖升级。"
           fi
