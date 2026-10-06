@@ -281,6 +281,7 @@ public class MainActivity extends Activity {
         if (value.startsWith("1.0.70\n")) value="1.0.71\n• 链接区接受所有合法 URI 协议，包括 magnet、thunder、ed2k、mailto 和 ftp 等链接\n• 新建链接的输入提示与网页端统一，不再误导为只支持 http/https\n• 屏蔽 javascript、vbscript 和 data 协议，避免不安全链接进入网页打开入口\n\n"+value;
         if (value.startsWith("1.0.71\n")) value="1.0.72\n• 文字区增加“普通”和“私”两个分类\n• 卡片右下角新增分类锁图标，可直接在两个分类之间切换\n• Android 与网页端同步分类状态，离线切换会自动排队重试\n\n"+value;
         if (value.startsWith("1.0.72\n")) value="1.0.73\n• 普通/私分类的锁图标改为与设备中心一致，并与收藏星星垂直对齐\n• 普通卡片显示打开锁，私卡片显示蓝绿色关闭锁\n• 分类切换条改为紧凑灰色连续样式，当前分类使用白色背景，不再画紫色下划线\n• 搜索悬浮按钮可拖动到整个文字内容区域的底部\n\n"+value;
+        if (value.startsWith("1.0.73\n")) value="1.0.74\n• 修复搜索悬浮按钮布局坐标与位移叠加导致底部无法拖动的问题\n• 普通/私分类条进一步压缩，并与设备状态条直接相连\n• 当前分类背景改为与内容区一致的浅色\n\n"+value;
         TextView v = new TextView(this); v.setText(value); v.setTextSize(sp); v.setTextColor(color); v.setPadding(dp(12),dp(10),dp(12),dp(10)); return v;
     }
     private GradientDrawable rounded(int color,int radius) { GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d; }
@@ -323,14 +324,14 @@ public class MainActivity extends Activity {
         uploadTasks=new LinearLayout(this);uploadTasks.setOrientation(LinearLayout.VERTICAL);uploadPanel.addView(uploadTasks,new LinearLayout.LayoutParams(-1,-2));
         LinearLayout.LayoutParams uploadPanelParams=new LinearLayout.LayoutParams(-1,-2);uploadPanelParams.setMargins(0,0,0,dp(8));root.addView(uploadPanel,uploadPanelParams);
         deviceStrip=text("",13,Color.rgb(73,62,80));deviceStrip.setGravity(Gravity.CENTER_VERTICAL);deviceStrip.setPadding(dp(12),0,dp(12),0);deviceStrip.setBackground(rounded(Color.rgb(239,234,242),8));deviceStrip.setVisibility(View.GONE);deviceStrip.setOnClickListener(v->showDeviceCenter());
-        LinearLayout.LayoutParams deviceStripParams=new LinearLayout.LayoutParams(-1,dp(38));deviceStripParams.setMargins(0,0,0,dp(7));root.addView(deviceStrip,deviceStripParams);
+        root.addView(deviceStrip,new LinearLayout.LayoutParams(-1,dp(38)));
         snippetSearchBar=new LinearLayout(this);snippetSearchBar.setGravity(Gravity.CENTER_VERTICAL);snippetSearchBar.setPadding(dp(10),0,dp(6),0);snippetSearchBar.setBackground(rounded(Color.WHITE,16));snippetSearchBar.setVisibility(View.GONE);
         TextView searchGlyph=text("⌕",18,Color.rgb(105,96,109));snippetSearchBar.addView(searchGlyph,new LinearLayout.LayoutParams(dp(28),dp(42)));
         snippetSearchInput=input("搜索文字标题和正文",false);snippetSearchInput.setSingleLine(true);snippetSearchInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);snippetSearchInput.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int before,int count){snippetSearchQuery=s.toString();renderSection();}public void afterTextChanged(Editable e){}});snippetSearchBar.addView(snippetSearchInput,new LinearLayout.LayoutParams(0,dp(42),1));
         TextView clearSearch=iconButton("⌫","清空搜索");clearSearch.setTextSize(18);clearSearch.setOnClickListener(v->{snippetSearchInput.setText("");snippetSearchInput.requestFocus();});snippetSearchBar.addView(clearSearch,new LinearLayout.LayoutParams(dp(38),dp(38)));
         TextView closeSearch=iconButton("×","关闭搜索");closeSearch.setTextSize(19);closeSearch.setOnClickListener(v->toggleSnippetSearch(false));LinearLayout.LayoutParams closeSearchParams=new LinearLayout.LayoutParams(dp(38),dp(38));closeSearchParams.setMarginStart(dp(2));snippetSearchBar.addView(closeSearch,closeSearchParams);
         LinearLayout.LayoutParams snippetSearchParams=new LinearLayout.LayoutParams(-1,dp(46));snippetSearchParams.setMargins(0,0,0,dp(7));root.addView(snippetSearchBar,snippetSearchParams);
-        snippetCategoryBar=new LinearLayout(this);snippetCategoryBar.setGravity(Gravity.CENTER);snippetCategoryBar.setBackground(rounded(Color.rgb(239,234,242),8));snippetNormalTab=snippetCategoryButton("普通","normal");snippetPrivateTab=snippetCategoryButton("私","private");snippetCategoryBar.addView(snippetNormalTab,new LinearLayout.LayoutParams(0,dp(30),1));snippetCategoryBar.addView(snippetPrivateTab,new LinearLayout.LayoutParams(0,dp(30),1));LinearLayout.LayoutParams snippetCategoryParams=new LinearLayout.LayoutParams(-1,dp(30));snippetCategoryParams.setMargins(0,0,0,dp(5));root.addView(snippetCategoryBar,snippetCategoryParams);
+        snippetCategoryBar=new LinearLayout(this);snippetCategoryBar.setGravity(Gravity.CENTER);snippetCategoryBar.setBackground(rounded(Color.rgb(239,234,242),8));snippetNormalTab=snippetCategoryButton("普通","normal");snippetPrivateTab=snippetCategoryButton("私","private");snippetCategoryBar.addView(snippetNormalTab,new LinearLayout.LayoutParams(0,dp(28),1));snippetCategoryBar.addView(snippetPrivateTab,new LinearLayout.LayoutParams(0,dp(28),1));root.addView(snippetCategoryBar,new LinearLayout.LayoutParams(-1,dp(28)));
         snippetSearchEmpty=text("没有找到匹配的文字",14,Color.rgb(105,96,109));snippetSearchEmpty.setGravity(Gravity.CENTER);snippetSearchEmpty.setVisibility(View.GONE);root.addView(snippetSearchEmpty,new LinearLayout.LayoutParams(-1,dp(72)));
         listHost=new FrameLayout(this);list=new ListView(this);adapter=new ItemAdapter();list.setAdapter(adapter);listHost.addView(list,new FrameLayout.LayoutParams(-1,-1));
         searchButton=new ImageView(this);searchButton.setImageResource(R.drawable.ic_action_search);searchButton.setImageTintList(android.content.res.ColorStateList.valueOf(Color.rgb(75,151,174)));searchButton.setScaleType(ImageView.ScaleType.CENTER);searchButton.setPadding(dp(12),dp(12),dp(12),dp(12));searchButton.setBackground(rounded(Color.rgb(244,240,246),23));searchButton.setContentDescription("搜索文字，可拖动调整位置");searchButton.setElevation(dp(5));searchButton.setOnClickListener(v->toggleSnippetSearch(true));configureSnippetSearchDrag();FrameLayout.LayoutParams floatingSearchParams=new FrameLayout.LayoutParams(dp(46),dp(46));listHost.addView(searchButton,floatingSearchParams);root.addView(listHost,new LinearLayout.LayoutParams(-1,0,1));listHost.post(this::restoreSnippetSearchPosition);
@@ -348,7 +349,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView snippetCategoryButton(String label,String key){TextView b=text(label,12,Color.rgb(73,62,80));b.setGravity(Gravity.CENTER);b.setPadding(0,0,0,0);b.setOnClickListener(v->{snippetCategory=key;prefs.edit().putString("snippet_category",snippetCategory).apply();updateSnippetCategoryTabs();renderSection();});return b;}
-    private void updateSnippetCategoryTabs(){if(snippetNormalTab==null||snippetPrivateTab==null)return;boolean privateSelected=snippetCategory.equals("private");int textColor=Color.rgb(73,62,80);snippetNormalTab.setTextColor(textColor);snippetPrivateTab.setTextColor(textColor);snippetNormalTab.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);snippetPrivateTab.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);snippetNormalTab.setBackground(privateSelected?new ColorDrawable(Color.TRANSPARENT):rounded(Color.WHITE,6));snippetPrivateTab.setBackground(privateSelected?rounded(Color.WHITE,6):new ColorDrawable(Color.TRANSPARENT));}
+    private void updateSnippetCategoryTabs(){if(snippetNormalTab==null||snippetPrivateTab==null)return;boolean privateSelected=snippetCategory.equals("private");int textColor=Color.rgb(73,62,80),contentColor=Color.rgb(250,247,252);snippetNormalTab.setTextColor(textColor);snippetPrivateTab.setTextColor(textColor);snippetNormalTab.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);snippetPrivateTab.setTypeface(Typeface.DEFAULT,Typeface.NORMAL);snippetNormalTab.setBackground(privateSelected?new ColorDrawable(Color.TRANSPARENT):rounded(contentColor,4));snippetPrivateTab.setBackground(privateSelected?rounded(contentColor,4):new ColorDrawable(Color.TRANSPARENT));}
 
     private void updateTabs(){
         for(Map.Entry<String,TextView> e:tabViews.entrySet()){
@@ -378,8 +379,8 @@ public class MainActivity extends Activity {
         searchButton.setOnTouchListener(new View.OnTouchListener(){float downRawX,downRawY,startX,startY;boolean dragging;
             public boolean onTouch(View view,MotionEvent event){
                 if(listHost==null)return false;
-                if(event.getActionMasked()==MotionEvent.ACTION_DOWN){downRawX=event.getRawX();downRawY=event.getRawY();startX=view.getX();startY=view.getY();dragging=false;view.getParent().requestDisallowInterceptTouchEvent(true);view.animate().scaleX(.94f).scaleY(.94f).setDuration(90).start();return true;}
-                if(event.getActionMasked()==MotionEvent.ACTION_MOVE){float dx=event.getRawX()-downRawX,dy=event.getRawY()-downRawY;if(!dragging&&Math.hypot(dx,dy)>slop)dragging=true;if(dragging){float maxX=Math.max(0,listHost.getWidth()-view.getWidth()),maxY=Math.max(0,listHost.getHeight()-view.getHeight());view.setX(Math.max(0,Math.min(maxX,startX+dx)));view.setY(Math.max(0,Math.min(maxY,startY+dy)));}return true;}
+                if(event.getActionMasked()==MotionEvent.ACTION_DOWN){downRawX=event.getRawX();downRawY=event.getRawY();startX=view.getTranslationX();startY=view.getTranslationY();dragging=false;view.getParent().requestDisallowInterceptTouchEvent(true);view.animate().scaleX(.94f).scaleY(.94f).setDuration(90).start();return true;}
+                if(event.getActionMasked()==MotionEvent.ACTION_MOVE){float dx=event.getRawX()-downRawX,dy=event.getRawY()-downRawY;if(!dragging&&Math.hypot(dx,dy)>slop)dragging=true;if(dragging){float maxX=Math.max(0,listHost.getWidth()-view.getMeasuredWidth()),maxY=Math.max(0,listHost.getHeight()-view.getMeasuredHeight());view.setTranslationX(Math.max(0,Math.min(maxX,startX+dx)));view.setTranslationY(Math.max(0,Math.min(maxY,startY+dy)));}return true;}
                 if(event.getActionMasked()==MotionEvent.ACTION_UP){view.getParent().requestDisallowInterceptTouchEvent(false);view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();if(dragging)saveSnippetSearchPosition();else view.performClick();return true;}
                 if(event.getActionMasked()==MotionEvent.ACTION_CANCEL){view.getParent().requestDisallowInterceptTouchEvent(false);view.animate().scaleX(1f).scaleY(1f).setDuration(90).start();if(dragging)saveSnippetSearchPosition();return true;}
                 return true;
@@ -388,15 +389,15 @@ public class MainActivity extends Activity {
     }
 
     private void saveSnippetSearchPosition(){
-        if(listHost==null||searchButton==null)return;float maxX=Math.max(1,listHost.getWidth()-searchButton.getWidth()),maxY=Math.max(1,listHost.getHeight()-searchButton.getHeight());
-        prefs.edit().putFloat(SEARCH_X_FRACTION,Math.max(0,Math.min(1,searchButton.getX()/maxX))).putFloat(SEARCH_Y_FRACTION,Math.max(0,Math.min(1,searchButton.getY()/maxY))).apply();
+        if(listHost==null||searchButton==null)return;float maxX=Math.max(1,listHost.getWidth()-searchButton.getMeasuredWidth()),maxY=Math.max(1,listHost.getHeight()-searchButton.getMeasuredHeight());
+        prefs.edit().putFloat(SEARCH_X_FRACTION,Math.max(0,Math.min(1,searchButton.getTranslationX()/maxX))).putFloat(SEARCH_Y_FRACTION,Math.max(0,Math.min(1,searchButton.getTranslationY()/maxY))).apply();
     }
 
     private void restoreSnippetSearchPosition(){
         if(listHost==null||searchButton==null||listHost.getWidth()==0||listHost.getHeight()==0)return;
-        float maxX=Math.max(0,listHost.getWidth()-searchButton.getWidth()),maxY=Math.max(0,listHost.getHeight()-searchButton.getHeight());
+        float maxX=Math.max(0,listHost.getWidth()-searchButton.getMeasuredWidth()),maxY=Math.max(0,listHost.getHeight()-searchButton.getMeasuredHeight());
         float xFraction=prefs.getFloat(SEARCH_X_FRACTION,1),yFraction=prefs.getFloat(SEARCH_Y_FRACTION,1);
-        searchButton.setX(maxX*Math.max(0,Math.min(1,xFraction)));searchButton.setY(maxY*Math.max(0,Math.min(1,yFraction)));
+        searchButton.setTranslationX(maxX*Math.max(0,Math.min(1,xFraction)));searchButton.setTranslationY(maxY*Math.max(0,Math.min(1,yFraction)));
     }
 
     private void moveSection(int direction){

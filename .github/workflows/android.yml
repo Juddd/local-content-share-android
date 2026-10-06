@@ -33,16 +33,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=v1.0.73
-          apk=content-transfer-v1.0.73.apk
+          tag=v1.0.74
+          apk=content-transfer-v1.0.74.apk
           curl --fail --location --retry 6 --retry-all-errors --retry-delay 5 -o "$apk" \
             "http://nas.yode.ink:8084/download/files/$apk"
-          echo "f6f010f90bbce3d72d4780f73b405133a64a80bd355854efdcbccd591c426ead  $apk" | sha256sum --check
+          echo "a4ca977885e8992e4c1949c2b29a0190acf90279354a5b7e751eefa698a6f665  $apk" | sha256sum --check
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$apk" --clobber
           else
             gh release create "$tag" "$apk" \
               --target "$GITHUB_SHA" \
-              --title "内容中转 Android 1.0.73" \
-              --notes "优化文字区普通与私分类的锁图标对齐与状态样式，分类切换条改为紧凑灰色连续样式，并修复搜索悬浮按钮无法拖到内容区底部的问题。使用原生产证书签名，可覆盖升级。"
+              --title "内容中转 Android 1.0.74" \
+              --notes "修复搜索悬浮按钮布局坐标与位移叠加导致底部无法拖动的问题；普通与私分类条进一步压缩并与设备状态条直接相连，当前分类改用内容区浅色背景。使用原生产证书签名，可覆盖升级。"
           fi
